@@ -1,0 +1,2 @@
+ORBE Motion app icon: original project mark created for this fork.
+The original upstream icon assets and their attribution files are retained separately for license compliance.

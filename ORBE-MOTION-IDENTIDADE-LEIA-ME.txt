@@ -1,0 +1,15 @@
+ORBE MOTION 0.1.8 — IDENTIDADE VISUAL
+
+O que mudou:
+- Marca orbital ORBE própria no cabeçalho.
+- Ícone ORBE Motion para o executável Windows e o ícone macOS.
+- Destaques em ciano e violeta, mantendo o tema escuro e a disposição dos painéis.
+- Tela inicial com o nome ORBE Motion Studio e texto mais direto.
+- Timeline, preview, painel de projeto e propriedades permanecem no mesmo lugar.
+
+Como executar:
+1. Extraia a pasta ORBE-Motion.
+2. Abra ORBE-MOTION-ABRIR.bat.
+3. Aguarde a compilação Rust.
+
+Este ZIP contém código-fonte, não um EXE pré-compilado. A compilação precisa ser verificada no Windows. Avisos de licença e atribuição foram preservados.

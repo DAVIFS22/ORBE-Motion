@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=ORBE Motion
+GenericName=Motion Graphics Editor
+Comment=Motion graphics and visual effects compositor
+Exec=orbe %F
+TryExec=orbe
+Icon=com.davifs22.orbemotion
+Terminal=false
+StartupNotify=true
+StartupWMClass=com.davifs22.orbemotion
+Categories=AudioVideo;Video;Graphics;2DGraphics;
+Keywords=motion;graphics;animation;compositor;effects;keyframe;vfx;

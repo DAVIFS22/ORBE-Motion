@@ -1,0 +1,13 @@
+ORBE MOTION - VERIFICADOR PARA WINDOWS
+
+1. Extraia todo o pacote para uma pasta local.
+2. Abra a pasta ORBE-Motion, onde ficam Cargo.toml e este arquivo.
+3. Dê dois cliques em VERIFICAR-ORBE-MOTION.bat.
+4. Aguarde o fim dos comandos e leia o resultado.
+5. Se aparecer [FALHA], tire uma captura da janela ou copie o erro completo.
+
+O arquivo BAT nao requer permissao de administrador e nao altera a politica
+ de execucao do PowerShell. Ele chama Cargo diretamente para verificar a
+formatacao, a compilacao e os testes. A verificacao pode demorar e requer
+Rust/Cargo instalado, conexao para dependencias ainda nao baixadas e espaco
+livre em disco. O script nao corrige bugs automaticamente.

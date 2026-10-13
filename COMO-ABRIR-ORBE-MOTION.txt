@@ -1,0 +1,12 @@
+ORBE MOTION - COMO ABRIR
+
+1. Extraia a pasta ORBE-Motion inteira para um local normal, como Documentos.
+2. Instale Rust pelo site oficial https://rustup.rs/ se ainda nao estiver instalado.
+3. Entre na pasta ORBE-Motion.
+4. Clique duas vezes em ORBE-MOTION-ABRIR.bat.
+5. Na primeira execucao, a compilacao pode demorar e baixar dependencias.
+6. Se ocorrer erro, a janela permanecera aberta. Copie a mensagem ou envie uma captura de tela.
+
+IMPORTANTE: este pacote contem codigo-fonte; ele nao inclui um orbe-motion.exe ja compilado.
+O arquivo BAT tenta compilar o aplicativo e abre o executavel se a compilacao tiver sucesso.
+Se a compilacao falhar, o aplicativo nao abrira ate que o erro seja corrigido.

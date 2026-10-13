@@ -1,0 +1,71 @@
+# ==========================================
+# ORBE Motion - Git Ignore
+# ==========================================
+
+# Arquivos temporários
+*~
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+
+# Planejamento e arquivos de trabalho locais
+plan/
+.claude/worktrees/
+
+# Compilação e distribuição
+target/
+dist/
+build/
+out/
+log/
+logs/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Configurações de ambiente
+.env
+.env.*
+!.env.example
+
+# Credenciais e segredos
+credentials.json
+secrets.*
+*.pem
+*.key
+*.pfx
+*.p12
+*.keystore
+*.jks
+*.secret
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Arquivos locais de diagnóstico e rebranding
+ocorrencias-effectcraft.txt
+rebrand_orbe.py
+corrigir_orbe_compilacao.py
+orbe_remover_colaboradores.py
+
+# Configurações locais de editores
+.vscode/
+.idea/
+*.code-workspace
+
+# Rust
+**/*.rs.bk
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/

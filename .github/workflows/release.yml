@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versão para publicar, por exemplo 0.2.7"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and Release ORBE Motion
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Enable Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build ORBE Motion
+        run: cargo build --release -p orbe-motion
+
+      - name: Determine release version
+        id: version
+        shell: pwsh
+        run: |
+          $version = "${{ inputs.version }}"
+
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            $cargoToml = Get-Content "apps/orbe-motion/Cargo.toml" -Raw
+            if ($cargoToml -match '(?m)^\s*version\s*=\s*"([^"]+)"') {
+              $version = $Matches[1]
+            } else {
+              throw "Não foi possível encontrar a versão em apps/orbe-motion/Cargo.toml"
+            }
+          }
+
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Prepare release files
+        shell: pwsh
+        run: |
+          $exe = "target/release/orbe-motion.exe"
+
+          if (!(Test-Path $exe)) {
+            throw "Executável não encontrado: $exe"
+          }
+
+          New-Item -ItemType Directory -Force -Path "release" | Out-Null
+          Copy-Item $exe "release/ORBE-Motion.exe"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $tag = "v${{ steps.version.outputs.version }}"
+
+          gh release create $tag `
+            "release/ORBE-Motion.exe" `
+            --repo "${{ github.repository }}" `
+            --title "ORBE Motion ${{ steps.version.outputs.version }}" `
+            --generate-notes

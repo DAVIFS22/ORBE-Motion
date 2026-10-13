@@ -1,0 +1,24 @@
+[package]
+name = "orbe-effects"
+description = "Effect registry (specs, parameters, categories) and CPU implementations of the effects library"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+orbe-geom = { workspace = true }
+orbe-color = { workspace = true }
+orbe-keyframe = { workspace = true }
+orbe-project = { workspace = true }
+orbe-raster = { workspace = true }
+orbe-segment = { workspace = true }
+orbe-track = { workspace = true }
+rayon = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+

@@ -1,0 +1,39 @@
+[package]
+name = "orbe-engine"
+description = "The ORBE Motion engine: session, undo history, editor state and the command registry every frontend (UI, CLI, control channel, MCP) dispatches through"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+orbe-time = { workspace = true }
+orbe-geom = { workspace = true }
+orbe-color = { workspace = true }
+orbe-keyframe = { workspace = true }
+orbe-project = { workspace = true }
+orbe-raster = { workspace = true }
+orbe-path = { workspace = true }
+orbe-text = { workspace = true }
+orbe-effects = { workspace = true }
+orbe-render = { workspace = true }
+orbe-segment = { workspace = true }
+orbe-track = { workspace = true }
+orbe-model = { workspace = true }
+orbe-lottie = { workspace = true }
+orbe-interchange = { workspace = true }
+orbe-psd = { workspace = true }
+kurbo = { workspace = true }
+orbe-svg = { workspace = true }
+orbe-pdf = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
+rayon = { workspace = true }
+image = { workspace = true }
+web-time = { workspace = true }
+exr = { workspace = true }

@@ -1,0 +1,19 @@
+[package]
+name = "orbe-project"
+description = "The ORBE Motion document: project items, compositions, layers and the After-Effects-style property tree"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+orbe-time = { workspace = true }
+orbe-geom = { workspace = true }
+orbe-color = { workspace = true }
+orbe-keyframe = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

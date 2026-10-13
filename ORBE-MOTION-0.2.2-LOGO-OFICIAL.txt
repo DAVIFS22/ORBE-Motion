@@ -1,0 +1,7 @@
+ORBE Motion 0.2.2 — Logo oficial exata
+- Ativos de marca ORBE Motion substituidos pela logo da coruja fornecida pelo usuario.
+- PNGs copiados do pacote oficial fornecido, sem alterar a arte.
+- Gerado orbe-motion.ico a partir do PNG oficial de 512 px.
+- Favicon web usa o SVG oficial.
+- Atribuicoes e licencas de terceiros preservadas.
+- Pacote de codigo-fonte; compilacao e validacao visual no Windows ainda necessarias.

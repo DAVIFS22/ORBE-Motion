@@ -1,0 +1,36 @@
+[package]
+name = "orbe-host"
+description = "Builds a fully wired ORBE Motion session: media decoding (FilmCraft codecs), importer, the expression engine and scripting"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+orbe-engine = { workspace = true }
+orbe-project = { workspace = true }
+orbe-media = { workspace = true }
+orbe-expr = { workspace = true }
+orbe-script = { workspace = true }
+orbe-export = { workspace = true }
+orbe-plugin = { workspace = true }
+
+# WebAssembly effect plug-ins run in wasmi on native builds.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+orbe-plugin = { workspace = true, features = ["wasm"] }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+orbe-psd = { workspace = true }
+orbe-svg = { workspace = true }
+orbe-pdf = { workspace = true }
+orbe-raster = { workspace = true }
+orbe-time = { workspace = true }
+orbe-interchange = { workspace = true }
+image = { workspace = true }
+gif = { workspace = true }
+exr = { workspace = true }
+rayon = { workspace = true }

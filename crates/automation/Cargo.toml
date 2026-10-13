@@ -1,0 +1,20 @@
+[package]
+name = "orbe-automation"
+description = "ORBE Motion MCP server (JSON-RPC 2.0 over stdio) over a headless session or bridged to the running app's control channel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+orbe-engine = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+image = { workspace = true }
+
+[dev-dependencies]
+orbe-script = { workspace = true }
+orbe-host = { workspace = true }

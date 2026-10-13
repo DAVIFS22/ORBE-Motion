@@ -1,0 +1,25 @@
+[package]
+name = "orbe-motion-cli"
+description = "ORBE Motion headless CLI: render frames and sequences, run commands, MCP server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "orbe-motion-cli"
+path = "src/main.rs"
+
+[dependencies]
+orbe-engine = { workspace = true }
+orbe-host = { workspace = true }
+orbe-automation = { workspace = true }
+orbe-ui-egui = { workspace = true }
+orbe-render = { workspace = true }
+orbe-gpu = { workspace = true }
+orbe-time = { workspace = true }
+serde_json = { workspace = true }
+image = { workspace = true }
+cpu-time = "1"
