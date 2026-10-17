@@ -1,0 +1,36 @@
+﻿secao;inicio;faixa;arquivo;ganho_db;fade_in;fade_out;duracao;descricao
+1-abertura;;efeitos;efeitos/vento-profundo.wav;-24;2;3;;Vento ambiente profundo e suave sob 'Imagine viajar milhares de anos no passado'
+1-abertura;;efeitos;efeitos/grave-sub-abertura.wav;-26;1.5;2;;Grave cinematografico discreto no inicio
+1-abertura;;efeitos;efeitos/ressonancia-templo.wav;-28;2;3;;Ressonancia distante de templos ao mostrar templos monumentais
+1-abertura;;efeitos;efeitos/whoosh-a.wav;-20;0.02;0.2;;Whoosh na entrada de 'Seu nome era Jesus de Nazare'
+1-abertura;;efeitos;efeitos/impacto-grave-suave-a.wav;-22;0.01;0.8;;Impacto grave suave na troca para 'Mas o que torna Jesus tao diferente'
+1-abertura;;musica;musica/trilha-misterio.wav;-20;3;4;;Trilha de misterio (ducking automatico sob a voz)
+2-civilizacoes;;efeitos;efeitos/ambiencia-templo.wav;-26;2;2;;Ambiencia de espaco monumental (Egito)
+2-civilizacoes;;efeitos;efeitos/vento-ruinas-deserto.wav;-26;2;2;;Vento em ruinas/deserto
+2-civilizacoes;;efeitos;efeitos/passos-pedra.wav;-30;0.3;0.5;;Passos discretos em piso de pedra
+2-civilizacoes;;efeitos;efeitos/impacto-suave-b.wav;-24;0.01;0.6;;Revelacao de Osiris/Anubis/Ra
+2-civilizacoes;;efeitos;efeitos/impacto-suave-c.wav;-24;0.01;0.6;;Revelacao de Zeus
+2-civilizacoes;;efeitos;efeitos/impacto-suave-d.wav;-24;0.01;0.6;;Revelacao de Odin
+3-identidade;;efeitos;efeitos/ambiencia-aldeia.wav;-30;2;2;;Ambiencia natural de aldeia antiga
+3-identidade;;efeitos;efeitos/papel-pergaminho.wav;-28;0.1;0.4;;Transicao delicada ao exibir manuscrito
+3-identidade;;musica;musica/nota-joao-1-1.wav;-22;0.5;2;;Nota musical sutil em Joao 1:1
+3-identidade;;musica;musica/nota-colossenses-1.wav;-22;0.5;2;;Nota musical sutil em Colossenses 1:16-17
+4-amor-servico;;efeitos;efeitos/passos-suaves.wav;-30;0.3;0.5;;Passos suaves
+4-amor-servico;;efeitos;efeitos/tecido-movimento.wav;-32;0.1;0.3;;Tecido/movimento no lava-pes (Joao 13)
+4-amor-servico;;musica;musica/contemplativa.wav;-24;3;4;;Musica contemplativa em volume baixo
+5-morte-esperanca;;efeitos;efeitos/vento-deserto.wav;-28;2;3;;Vento em ambiente desertico
+5-morte-esperanca;;efeitos;efeitos/grave-atmosferico.wav;-30;2;3;;Grave atmosferico suave nas referencias a morte
+6-crucificacao;;efeitos;efeitos/vento-crescente.wav;-26;4;3;;Vento progressivamente mais intenso
+6-crucificacao;;efeitos;efeitos/grave-sutil.wav;-30;2;3;;Graves cinematograficos sutis
+6-crucificacao;;musica;musica/trilha-crucificacao.wav;-22;3;6;;Musica que reduz gradualmente; termine o cue antes do silencio apos a morte
+7-ressurreicao;;efeitos;efeitos/vento-suave-tumulo.wav;-30;3;2;;Vento suave na abertura do tumulo (comeca apos o silencio)
+7-ressurreicao;;efeitos;efeitos/textura-crescente.wav;-30;4;2;;Textura sonora crescente e delicada
+7-ressurreicao;;efeitos;efeitos/impacto-revelacao.wav;-22;0.01;1.5;;Impacto controlado na revelacao do tumulo vazio
+7-ressurreicao;;musica;musica/cordas-coral.wav;-22;6;4;;Cordas + coral discreto crescendo
+8-comparacao;;efeitos;efeitos/whoosh-b.wav;-24;0.02;0.2;;Whoosh discreto - 'Primeiro'
+8-comparacao;;efeitos;efeitos/impacto-suave-e.wav;-26;0.01;0.6;;Impacto suave - 'Segundo'
+8-comparacao;;efeitos;efeitos/whoosh-c.wav;-24;0.02;0.2;;Whoosh discreto - 'Terceiro'
+8-comparacao;;efeitos;efeitos/impacto-suave-f.wav;-26;0.01;0.6;;Impacto suave - 'Quarto'
+8-comparacao;;efeitos;efeitos/impacto-suave-g.wav;-24;0.01;0.8;;Impacto suave - 'Quinto'
+8-comparacao;;musica;musica/trilha-crescente.wav;-22;4;4;;Trilha crescendo sem excesso de graves
+9-encerramento;;musica;musica/piano-final.wav;-24;3;5;;Piano + ambiencia suave; fade-out antes de 'Quem e Jesus para voce?' ou bem baixo sob ela
