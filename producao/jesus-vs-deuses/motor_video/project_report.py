@@ -1,0 +1,171 @@
+"""Relatório final da produção: o que foi gerado, de onde veio cada imagem e o que ficou pendente."""
+
+from __future__ import annotations
+
+import csv
+from collections import Counter
+from datetime import datetime
+from pathlib import Path
+
+from .config import salvar_json
+
+NOMES_FONTE = {"commons": "Wikimedia Commons", "met": "The Metropolitan Museum of Art (Open Access)",
+               "aic": "Art Institute of Chicago (domínio público)", "usuario": "Fornecida pelo usuário"}
+
+
+def _mmss(s: float) -> str:
+    return f"{int(s // 60):02d}:{s % 60:05.2f}"
+
+
+def escrever_fontes_csv(assets: list[dict], destino: Path):
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    with open(destino, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.writer(f, delimiter=";")
+        w.writerow(["id", "cenas", "arquivo", "fonte", "titulo", "autor", "licenca", "url_pagina", "url_arquivo", "natureza",
+                    "largura", "altura"])
+        for a in assets:
+            w.writerow([a["id"], ",".join(a["cenas"]), a["arquivo_original"], NOMES_FONTE.get(a["fonte"], a["fonte"]), a["titulo"],
+                        a["autor"], a["licenca"], a["url_pagina"], a["url_arquivo"], a["natureza"], a["largura"], a["altura"]])
+
+
+def escrever_creditos(assets: list[dict], destino: Path):
+    """Texto de créditos pronto para a descrição do vídeo (atribuição exigida por CC BY / CC BY-SA)."""
+    linhas = ["# Créditos das imagens", "",
+              "Imagens de acervos abertos usadas no documentário “Jesus contra todos os deuses: por que Jesus é único?”.",
+              "Obras de arte aparecem como obras de arte (digitalizações de acervo), não como fotografias da época. "
+              "Cenários identificados como “gerados por código” são ilustrações próprias, sem material de terceiros.", ""]
+    por_licenca: dict[str, list[dict]] = {}
+    for a in assets:
+        por_licenca.setdefault(a["licenca"], []).append(a)
+    for lic in sorted(por_licenca):
+        linhas += [f"## {lic}", ""]
+        for a in sorted(por_licenca[lic], key=lambda x: x["titulo"].lower()):
+            autor = a["autor"] or "autor não informado"
+            linhas.append(f"- “{a['titulo']}” — {autor} — {NOMES_FONTE.get(a['fonte'], a['fonte'])} — {a['url_pagina'] or a['url_arquivo']}")
+        linhas.append("")
+    if not assets:
+        linhas.append("_Nenhuma imagem de terceiros foi usada nesta versão._")
+    destino.write_text("\n".join(linhas), encoding="utf-8")
+
+
+def gerar(ctx: dict, pasta: Path) -> Path:
+    pasta.mkdir(parents=True, exist_ok=True)
+    assets = ctx["assets"]
+    escrever_fontes_csv(assets, pasta / "fontes-imagens.csv")
+    escrever_creditos(assets, pasta / "creditos-imagens.md")
+    salvar_json(pasta / "relatorio-producao.json", ctx)
+
+    qc = ctx.get("qc") or {}
+    aprovado = qc.get("aprovado", False)
+    tl = ctx["timeline"]
+    L: list[str] = []
+    add = L.append
+    add("# Relatório de produção: Jesus contra todos os deuses")
+    add("")
+    add(f"Gerado em {datetime.now():%d/%m/%Y %H:%M} pelo motor de vídeo versão {ctx['versao']}.")
+    add("")
+    if ctx.get("validacao"):
+        add("> **ATENÇÃO: este é um vídeo de VALIDAÇÃO do motor.** A narração real não estava disponível neste ambiente; "
+            "foi usada uma narração-guia sintética (ruído com o ritmo da fala, sem palavras), só para exercitar a "
+            "sincronia, a mixagem e as verificações. Para o vídeo final, rode o motor com o arquivo de narração real.")
+        add("")
+    add("## Resultado")
+    add("")
+    add(f"- **Situação:** {'APROVADO em todas as verificações' if aprovado else 'NÃO APROVADO: veja as verificações abaixo'}")
+    if ctx.get("video"):
+        add(f"- **Vídeo:** `{ctx['video']}` ({ctx['video_mb']:.1f} MB, {_mmss(ctx['duracao_video_s'])}, "
+            f"{ctx['cfg']['largura']}x{ctx['cfg']['altura']} a {ctx['cfg']['fps']} fps)")
+    add(f"- **Legendas (SRT):** `{ctx.get('srt')}` ({ctx.get('n_legendas', 0)} legendas)")
+    add(f"- **Créditos das imagens:** `{pasta / 'creditos-imagens.md'}`  |  **Fontes (CSV):** `{pasta / 'fontes-imagens.csv'}`")
+    add(f"- **Linha do tempo:** `{ctx.get('timeline_json')}`")
+    add(f"- **Log:** `{ctx.get('log')}`")
+    add("")
+    add("## Entradas")
+    add("")
+    e = ctx["entradas"]
+    add(f"- Narração: `{e['narracao_original']}` ({e['narracao_duracao_s']:.1f} s; SHA-256 `{e['narracao_sha256'][:16]}…`)"
+        + (" (já tratada: não foi reprocessada)" if e.get("narracao_tratada") else " (usada como está: sem filtros de voz)"))
+    add(f"- Roteiro: `{e['roteiro']}`")
+    add(f"- Transcrição com tempos: `{e['transcricao']}`" if e.get("transcricao") else "- Transcrição: **não fornecida**: tempos estimados proporcionalmente (sincronia aproximada)")
+    add(f"- Voz nova gerada: **não** (a narração existente é a referência temporal; nenhuma voz foi sintetizada).")
+    al = ctx["alinhamento"]
+    add(f"- Alinhamento roteiro × transcrição: {al['cobertura'] * 100:.1f}% das {al['palavras']} palavras reconhecidas; "
+        f"{len(al['lacunas'])} trecho(s) do roteiro sem correspondência.")
+    for lac in al["lacunas"]:
+        suspeita = " (provavelmente não narrado/não transcrito)" if lac.get("suspeita_nao_narrado") else ""
+        add(f"    - {_mmss(lac['t_ini'])}: {lac['palavras']} palavras{suspeita}: “{lac['texto']}”")
+    add("")
+    add("## Linha do tempo")
+    add("")
+    add(f"- {tl['cenas']} cenas, {tl['planos']} planos; {tl['planos_com_imagem']} com imagem baixada e licenciada, "
+        f"{tl['planos_gerados']} com cenário gerado por código (alternativa quando não há imagem).")
+    for a in ctx.get("avisos", []):
+        add(f"- Aviso: {a}")
+    add("")
+    add("## Imagens e licenças")
+    add("")
+    cont = Counter(a["fonte"] for a in assets)
+    if assets:
+        add("Imagens baixadas e validadas: " + ", ".join(f"{NOMES_FONTE.get(k, k)}: {v}" for k, v in cont.items()) + ".")
+    else:
+        add("**Nenhuma imagem de terceiros foi baixada nesta execução.** " + (ctx.get("rede") or ""))
+    add("")
+    if ctx["pendencias"]:
+        add(f"### Pendências ({len(ctx['pendencias'])} cena(s) sem imagem adequada)")
+        add("")
+        add("Nessas cenas foi usado um cenário gerado por código (ilustração estilizada, **não** fotografia). "
+            "Rode de novo com acesso à internet, ou coloque imagens próprias em uma pasta e use `--imagens`.")
+        add("")
+        for p in ctx["pendencias"][:60]:
+            add(f"- `{p['cena']}`: {p['motivo']}")
+        if len(ctx["pendencias"]) > 60:
+            add(f"- … e mais {len(ctx['pendencias']) - 60} (veja o JSON).")
+        add("")
+    if ctx["falhas_download"]:
+        add(f"### Candidatos descartados ({len(ctx['falhas_download'])})")
+        add("")
+        motivos = Counter(f["motivo"].split(":")[0][:60] for f in ctx["falhas_download"])
+        for m, n in motivos.most_common(8):
+            add(f"- {n}× {m}")
+        add("")
+    add("## Áudio")
+    add("")
+    au = ctx["audio"]
+    add(f"- Narração: nível ativo {au['narracao_rms_db']:.1f} dBFS, pico {au['narracao_pico_db']:.1f} dBFS.")
+    add(f"- Mix final: {au.get('mix_lufs', '?')} LUFS (alvo {au.get('alvo_lufs')} LUFS), true peak máx. {au.get('true_peak')} dBTP; "
+        "a música abaixa sob a fala (sidechain), os efeitos têm ducking leve; fade-out limpo no final.")
+    usos = Counter((f["tipo"], f["origem"]) for f in au["fontes"])
+    for (tipo, origem), n in sorted(usos.items()):
+        add(f"    - {tipo}: {n}× {origem}")
+    add("- Todos os sons desta versão são ambientação sintetizada por código ou arquivos fornecidos pelo usuário; "
+        "nenhum é apresentado como gravação histórica nem como som do acontecimento bíblico.")
+    add("")
+    add("## Renderização")
+    add("")
+    r = ctx.get("render") or {}
+    add(f"- Encoder: {r.get('encoder')} ({'hardware' if r.get('hardware') else 'CPU'}); {r.get('blocos')} blocos "
+        f"({r.get('blocos_reaproveitados', 0)} reaproveitados); {r.get('quadros')} quadros em {r.get('tempo_renderizacao_s')} s.")
+    add(f"- Movimento de câmera calculado por código (zoom, panorâmica, Ken Burns) com foco protegido; transições: "
+        f"{', '.join(f'{k} ({v})' for k, v in tl['transicoes'].items())}.")
+    add("- Não implementado: parallax com camadas de profundidade (exigiria segmentação de imagem); detecção de rostos usa "
+        "OpenCV só se instalado, senão um mapa de saliência.")
+    add("")
+    add("## Verificações")
+    add("")
+    for i in qc.get("itens", []):
+        marca = {"ok": "OK", "aviso": "AVISO", "falha": "FALHA"}[i["status"]]
+        add(f"- **{marca}**: {i['nome']}: {i['detalhe']}")
+    add("")
+    add("## Tempo gasto por etapa")
+    add("")
+    for k, v in ctx["tempos"].items():
+        add(f"- {k}: {v:.1f} s")
+    add("")
+    add("## Como reproduzir")
+    add("")
+    add("```")
+    add(ctx["comando"])
+    add("```")
+    destino = pasta / "relatorio-producao.md"
+    destino.write_text("\n".join(L) + "\n", encoding="utf-8")
+    return destino
