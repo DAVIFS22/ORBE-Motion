@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import hashlib
 import re
-import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+import numpy as np
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from .config import ErroProducao, ler_json, log, salvar_json
@@ -49,6 +49,8 @@ class Asset:
     credito: str = ""
     consulta: str = ""
     cenas: list[str] = field(default_factory=list)
+    tipo: str = "imagem"      # imagem | video
+    duracao: float = 0.0      # segundos (vídeos)
 
     @property
     def exige_atribuicao(self) -> bool:
@@ -61,7 +63,7 @@ class Asset:
 
 def dhash(img: Image.Image) -> str:
     g = img.convert("L").resize((9, 8), Image.LANCZOS)
-    px = list(g.getdata())
+    px = np.asarray(g, dtype=np.int16).ravel().tolist()
     bits = 0
     for y in range(8):
         for x in range(8):
@@ -98,9 +100,7 @@ def abrir_e_validar(caminho: Path, min_largura: int = MIN_LARGURA_PADRAO) -> Ima
     if proporcao > 4.0 or proporcao < 0.5:
         raise ImagemInvalida(f"proporção inadequada ({w}x{h})")
     amostra = img.convert("L").resize((64, 64))
-    pixels = list(amostra.getdata())
-    media = sum(pixels) / len(pixels)
-    desvio = (sum((p - media) ** 2 for p in pixels) / len(pixels)) ** 0.5
+    desvio = float(np.asarray(amostra, dtype=np.float64).std())
     if desvio < 3.0:
         raise ImagemInvalida("imagem praticamente uniforme (vazia ou em branco)")
     return img
@@ -217,6 +217,38 @@ class GerenciadorAssets:
         self.salvar()
         return asset
 
+    def baixar_video(self, cand: Candidato, cena: str, consulta: str, min_duracao: float) -> Asset:
+        if self.http is None:
+            raise RedeIndisponivel("modo offline")
+        motivo = e_suspeito(cand)
+        if motivo:
+            raise ImagemInvalida(f"metadados indicam IA/marca d'água/estoque ({motivo})")
+        if cand.duracao and cand.duracao < min_duracao:
+            raise ImagemInvalida(f"vídeo curto demais ({cand.duracao:.1f}s)")
+        base = re.sub(r"[^a-z0-9]+", "-", f"{cand.fonte}-{cand.titulo}".lower()).strip("-")[:60] or "video"
+        ext = Path(cand.titulo).suffix or {"video/webm": ".webm", "video/mp4": ".mp4"}.get(cand.mime, ".webm")
+        destino = self.dir_orig / f"{base}-{cand.id_fonte}{ext}"
+        if not destino.is_file():
+            self.http.baixar(cand.url_arquivo, destino, max_bytes=400 * 1024 * 1024)
+        try:
+            meta = validar_video(destino, min_duracao)
+        except ImagemInvalida:
+            destino.unlink(missing_ok=True)
+            raise
+        sha = sha256_bytes(destino)
+        if any(a.sha256 == sha for a in self.assets.values()):
+            raise ImagemInvalida("duplicado")
+        aid = sha[:12]
+        asset = Asset(
+            id=aid, arquivo_original=str(destino.relative_to(self.pasta)), arquivo_trabalho=str(destino.relative_to(self.pasta)),
+            fonte=cand.fonte, titulo=cand.titulo, autor=cand.autor, licenca=cand.licenca, licenca_categoria=cand.licenca_categoria,
+            licenca_url=cand.licenca_url, url_pagina=cand.url_pagina, url_arquivo=cand.url_arquivo, natureza="filmagem de acervo aberto",
+            largura=meta["largura"], altura=meta["altura"], sha256=sha, phash="0" * 16, credito=cand.credito, consulta=consulta,
+            cenas=[cena], tipo="video", duracao=meta["duracao"])
+        self.assets[aid] = asset
+        self.salvar()
+        return asset
+
     def importar_local(self, caminho: Path, cena: str) -> Asset:
         """Imagem fornecida pelo usuário (a licença é responsabilidade dele)."""
         img = abrir_e_validar(caminho, 900)
@@ -239,6 +271,67 @@ class GerenciadorAssets:
         self.assets[aid] = asset
         self.salvar()
         return asset
+
+
+# ---------------------------------------------------------------- vídeos ---
+
+MIN_LARGURA_VIDEO = 854
+
+
+def validar_video(caminho: Path, min_duracao: float) -> dict:
+    """Confere com o FFprobe e decodifica alguns quadros; devolve {largura, altura, duracao, fps}."""
+    import subprocess
+    from .config import ffprobe_json
+    try:
+        info = ffprobe_json(caminho)
+    except ErroProducao as e:
+        raise ImagemInvalida(f"vídeo ilegível ({str(e)[:80]})") from e
+    v = next((s for s in info.get("streams", []) if s.get("codec_type") == "video"), None)
+    if v is None:
+        raise ImagemInvalida("arquivo sem faixa de vídeo")
+    dur = float(info.get("format", {}).get("duration") or v.get("duration") or 0)
+    w, h = int(v.get("width", 0)), int(v.get("height", 0))
+    if w < MIN_LARGURA_VIDEO:
+        raise ImagemInvalida(f"resolução baixa demais ({w}x{h})")
+    if dur < min_duracao:
+        raise ImagemInvalida(f"vídeo curto demais ({dur:.1f}s; precisa de {min_duracao:.1f}s)")
+    teste = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{dur / 2:.2f}", "-i", str(caminho), "-frames:v", "5", "-f", "null", "-"],
+                           capture_output=True)
+    if teste.returncode != 0 or teste.stderr.strip():
+        raise ImagemInvalida("falha ao decodificar o vídeo")
+    num, _, den = str(v.get("r_frame_rate", "30/1")).partition("/")
+    return {"largura": w, "altura": h, "duracao": dur, "fps": float(num) / float(den or 1) if float(den or 1) else 30.0}
+
+
+
+
+def obter_videos_para_cena(cena_id: str, consultas: list[str], min_duracao: float, gerenciador: GerenciadorAssets, provedores: list) -> Asset | None:
+    """Procura UMA filmagem licenciada (≥ min_duracao s, ≥ 854 px) para a cena; registra pendência se não houver."""
+    prov = next((p for p in provedores if getattr(p, "nome", "") == "commons" and hasattr(p, "buscar_video")), None)
+    if prov is None:
+        return None
+    for q in consultas:
+        chave = f"commons-video|{q}"
+        try:
+            if chave in gerenciador.cache_buscas:
+                cands = [Candidato(**d) for d in gerenciador.cache_buscas[chave]]
+            else:
+                cands = prov.buscar_video(q)
+                gerenciador.cache_buscas[chave] = [c.para_dict() for c in cands]
+                gerenciador.salvar()
+        except (RedeIndisponivel, AcessoNegado, ErroProducao) as e:
+            gerenciador.registrar_falha(cena_id, None, f"busca de vídeo '{q}': {e}")
+            return None
+        ordenados = sorted(cands, key=lambda c: -(min(c.largura, 1920) / 1920 * 2 + (c.rank * -0.05) + min(c.duracao, 60) / 60))
+        for cand in ordenados:
+            try:
+                return gerenciador.baixar_video(cand, cena_id, q, min_duracao)
+            except ImagemInvalida as e:
+                gerenciador.registrar_falha(cena_id, cand, str(e))
+            except ErroProducao as e:
+                gerenciador.registrar_falha(cena_id, cand, str(e))
+    gerenciador.registrar_pendencia(cena_id, f"nenhuma filmagem licenciada adequada (≥{min_duracao:.0f}s, ≥{MIN_LARGURA_VIDEO}px)", consultas)
+    return None
 
 
 # --------------------------------------------------------------- pesquisa ---

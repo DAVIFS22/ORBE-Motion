@@ -9,7 +9,7 @@ Obras de arte aparecem como obras de arte (com autor e acervo nos créditos),
 nunca como fotografias do passado.
 """
 
-from .storyboard import C, CAP, LISTA, PONTO, TITULO, VERS, Secao
+from .storyboard import C, CAP, LISTA, PONTO, T3D, TITULO, VERS, Secao
 
 SECOES = {
     "1-abertura": Secao("1-abertura", "misterio", ["vento_profundo", "ressonancia_templo"], "Mistério das civilizações"),
@@ -18,7 +18,7 @@ SECOES = {
     "4-amor": Secao("4-amor", "contemplativa", ["natureza_discreta"], "Amor e serviço"),
     "5-morte": Secao("5-morte", "morte", ["vento_deserto", "grave_atmosferico"], "Morte e esperança"),
     "6-crucificacao": Secao("6-crucificacao", "crucificacao", ["vento_crescente", "grave_sutil"], "Crucificação"),
-    "7-ressurreicao": Secao("7-ressurreicao", "ressurreicao", ["vento_suave"], "Ressurreição"),
+    "7-ressurreicao": Secao("7-ressurreicao", "ressurreicao", ["vento_suave", "textura_crescente"], "Ressurreição"),
     "8-comparacao": Secao("8-comparacao", "comparacao", ["vento_suave"], "Comparação final"),
     "9-encerramento": Secao("9-encerramento", "encerramento", ["vento_suave"], "Encerramento"),
 }
@@ -53,7 +53,8 @@ CENAS = [
     # ======================= 2. CIVILIZAÇÕES (apresentação) =====================
     C("b01-egito", B, "No Egito antigo, diferentes divindades", "Egito antigo: templos, hieróglifos e pirâmides",
       ["Abu Simbel temple Egypt", "Egyptian temple hieroglyphs wall relief", "Pyramids of Giza"],
-      "deserto_egito", ("pan_dir", "zoom_in"), "quente", "normal", ov=[CAP("Egito antigo", "Criação, realeza e vida após a morte")]),
+      "deserto_egito", ("pan_dir", "zoom_in"), "quente", "normal", ov=[CAP("Egito antigo", "Criação, realeza e vida após a morte")],
+      sfx=["passos"]),
     C("b02-grecia", B, "Na Grécia, Zeus era reverenciado", "Grécia antiga: Acrópole, templo de Zeus, estátua de Zeus",
       ["Parthenon Acropolis Athens", "Temple of Olympian Zeus Athens", "Zeus statue Artemision bronze National Archaeological Museum"],
       "templo_grego", ("zoom_in", "pan_esq"), "quente", "normal", sfx=["impacto"], ov=[CAP("Grécia antiga", "Zeus e o Olimpo")]),
@@ -139,7 +140,7 @@ CENAS = [
       ["Egyptian hieroglyphs temple wall detail", "Egyptian papyrus painting"], "deserto_egito", "pan_esq", "quente", "normal"),
     C("d07-sociedades", B, "Elas faziam parte de sociedades complexas,", "Sociedades complexas: arte e arquitetura",
       ["Egyptian jewelry gold museum", "Karnak temple avenue of sphinxes", "Egyptian funerary mask Tutankhamun"],
-      "deserto_egito", ("deriva", "zoom_in"), "dourado", "normal"),
+      "deserto_egito", ("deriva", "zoom_in"), "dourado", "normal", sfx=["passos"]),
     C("d08-zeus", B, "Na Grécia antiga, Zeus era considerado", "Zeus, soberano do Olimpo",
       ["Zeus of Otricoli bust", "Temple of Zeus Olympia ruins", "Mount Olympus Greece"], "templo_grego", ("zoom_in", "pan_dir"),
       "quente", "normal", sfx=["impacto"], ov=[CAP("Grécia antiga", "Zeus, soberano do Olimpo")]),
@@ -483,22 +484,22 @@ CENAS = [
       ["Codex Sinaiticus Gospel of John"], "pergaminho", "pan_dir", "quente", "normal"),
     C("j06-segundo", I, "Segundo: Jesus é apresentado como criador,", "Ponto 2: criador (Colossenses 1)",
       ["Hubble nebula stars NASA", "Earth from space NASA"], "cosmos", "zoom_in", "frio", "normal",
-      ov=[PONTO(2, "Criador", 0.2, 5.0)], sfx=["impacto"]),
+      ov=[PONTO(2, "Criador", 0.2, 5.0)], sfx=["whoosh", "impacto"]),
     C("j06b-col1", I, "Colossenses 1 afirma que todas as coisas", "Todas as coisas criadas por meio dele e para ele",
       ["Papyrus 46 Colossians", "galaxy NASA"], "cosmos", "zoom_out", "frio", "normal"),
     C("j07-terceiro", I, "Terceiro: Jesus revela o caráter de Deus", "Ponto 3: amor e serviço",
       ["Christ washing the disciples' feet painting", "a:Christ washing feet"], "luz_dourada", "zoom_in", "quente", "normal",
-      ov=[PONTO(3, "Amor e serviço", 0.2, 5.0)], sfx=["impacto"]),
+      ov=[PONTO(3, "Amor e serviço", 0.2, 5.0)], sfx=["whoosh", "impacto"]),
     C("j07b-marcos", I, "Em Marcos 10:45, Ele declara que veio", "Marcos 10:45: sacrifício e grandeza",
       ["Christ serving painting Carl Bloch", "a:Christ compassion"], "luz_dourada", "pan_dir", "quente", "normal"),
     C("j08-quarto", I, "Quarto: Jesus é apresentado como aquele", "Ponto 4: reconciliação com Deus",
       ["Return of the Prodigal Son Rembrandt", "a:Prodigal Son"], "luz_dourada", "zoom_in", "quente", "normal",
-      ov=[PONTO(4, "Reconciliação", 0.2, 5.0)], sfx=["impacto"]),
+      ov=[PONTO(4, "Reconciliação", 0.2, 5.0)], sfx=["whoosh", "impacto"]),
     C("j08b-romanos", I, "Romanos 5 e outros textos do Novo Testamento", "Morte de Cristo com significado salvador",
       ["Crucifixion Christ painting", "a:Crucifixion"], "cruz_colina", "zoom_in", "escuro", "normal"),
     C("j09-quinto", I, "Quinto: Jesus é proclamado como ressuscitado.", "Ponto 5: ressuscitado",
       ["Resurrection Christ painting", "a:Resurrection"], "amanhecer", "zoom_in", "dourado", "normal",
-      ov=[PONTO(5, "Ressuscitado", 0.2, 5.0)], sfx=["impacto"]),
+      ov=[PONTO(5, "Ressuscitado", 0.2, 5.0)], sfx=["whoosh", "impacto"]),
     C("j09b-1cor15", I, "Em 1 Coríntios 15, a ressurreição", "1 Coríntios 15: fundamento da esperança cristã",
       ["Papyrus 46 First Corinthians", "sunrise empty tomb light"], "tumulo", "zoom_in", "dourado", "normal"),
     C("j10-cinco", I, "Esses cinco pontos formam o argumento central", "Os cinco pontos do argumento central",
@@ -601,3 +602,78 @@ CENAS = [
       ["Christ Pantocrator Sinai face", "m:Christ"], "luz_dourada", "respiro", "dourado", "lento", trans="dip_gold",
       ov=[TITULO("Quem é Jesus para você?", None, atraso=0.4)], sfx=["silencio:0.6"]),
 ]
+
+
+# ============================================================================
+# ANIMAÇÃO 3D (Blender), somente pontual. A base do documentário são fotografias reais,
+# obras de arte, mapas e vídeos licenciados; o 3D entra onde ajuda a reconstruir um ambiente
+# ou aumenta o impacto de um momento narrativo.
+#   P1 = essencial (abertura, reconstruções, momentos de maior impacto): sempre que houver Blender.
+#   P2 = desejável: só quando não foi encontrada imagem real adequada para o plano.
+# ============================================================================
+_ATRIBUICOES_3D = {
+    # P1
+    "a03-templos": T3D("templo_egipcio", 1, "sempre"),                  # abertura: templos monumentais
+    "b02-grecia": T3D("templo_grego", 1, "sempre"),                     # Grécia: templo dórico
+    "d11-ragnarok": T3D("ragnarok", 1, "sempre"),                       # Ragnarök (mitologia nórdica)
+    "h01-centro": T3D("colina_cruzes", 1, "sempre"),                    # a crucificação: colina ao entardecer
+    "i03-mulheres": T3D("tumulo_vazio", 1, "sempre"),                   # a ressurreição: o túmulo ao amanhecer
+    "k10-doismil": T3D("aldeia_judeia", 1, "sempre"),                   # estradas e aldeias da Judeia/Galileia
+    # P2 (quando não há imagem real)
+    "b01-egito": T3D("relevo_egipcio", 2),
+    "d03-osiris": T3D("deus_osiris", 2),
+    "d04-anubis": T3D("deus_anubis", 2),
+    "d05-ra": T3D("deus_ra", 2),
+    "d08-zeus": T3D("deus_zeus", 2),
+    "g05-hades": T3D("deus_hades", 2),
+    "b04-odin": T3D("deus_odin", 2),
+    "b03-nordicos": T3D("fiorde_nordico", 2),
+    "f01-pergunta": T3D("lago_galileia", 2),
+    "b05-diferentes": T3D("mapa_3d", 2, lugares=["Egito", "Atenas", "Roma"]),
+    "c01-seculos": T3D("mapa_3d", 2, lugares=["Roma", "Jerusalém"]),
+    "d12-diferenca": T3D("mapa_3d", 2, lugares=["Atenas", "Roma", "Oslo"]),
+}
+# fotos de paisagem que podem ganhar paralaxe 2.5D (P3, opcional): posição do horizonte na foto
+_PARALAXE = {"c05-nazare": 0.5, "e18-belem": 0.5, "g14-vitoria": 0.55, "k09-proposito": 0.55, "k25-decidir": 0.5}
+
+ROTULOS_3D = {
+    "templo_egipcio": "Reconstrução artística em 3D: templo egípcio (não é registro histórico)",
+    "relevo_egipcio": "Reconstrução artística em 3D: relevo em pedra (não é registro histórico)",
+    "templo_grego": "Reconstrução artística em 3D: templo grego (não é registro histórico)",
+    "deus_anubis": "Representação artística estilizada em 3D: Anúbis",
+    "deus_ra": "Representação artística estilizada em 3D: Rá",
+    "deus_osiris": "Representação artística estilizada em 3D: Osíris",
+    "deus_zeus": "Representação artística estilizada em 3D: Zeus",
+    "deus_hades": "Representação artística estilizada em 3D: Hades",
+    "deus_odin": "Representação artística estilizada em 3D: Odin",
+    "ragnarok": "Representação artística do Ragnarök (mitologia nórdica)",
+    "fiorde_nordico": "Reconstrução artística em 3D: paisagem nórdica",
+    "aldeia_judeia": "Reconstrução artística em 3D: aldeia da Judeia/Galileia, século I (não é registro histórico)",
+    "lago_galileia": "Reconstrução artística em 3D: lago na Galileia",
+    "colina_cruzes": "Representação artística em 3D, não é registro histórico",
+    "tumulo_vazio": "Representação artística em 3D, não é registro histórico",
+    "mapa_3d": "Mapa esquemático em 3D (rotas ilustrativas)",
+    "foto_2_5d": "Fotografia com movimento de câmera em 3D (paralaxe)",
+}
+
+# filmagens licenciadas (Commons) para o primeiro plano de cenas com natureza/paisagem; se não houver, usa-se foto ou cenário
+_VIDEOS = {
+    "a02-imagine": ["night sky time-lapse stars", "milky way time-lapse"],
+    "a04-ceu": ["clouds time-lapse sky"],
+    "a05-natureza": ["thunderstorm lightning", "ocean waves storm", "volcano eruption"],
+    "b01-egito": ["Nile river Egypt", "Karnak temple", "pyramids of Giza"],
+    "b03-nordicos": ["Norwegian fjord", "fjord Norway drone"],
+    "c06-ensino": ["Sea of Galilee"],
+    "f01-pergunta": ["Sea of Galilee sunrise", "Galilee landscape"],
+    "g17-palavra-final": ["sunrise time-lapse", "dawn clouds time-lapse"],
+    "k06-permaneceu": ["stars time-lapse night sky"],
+    "k09-proposito": ["sunrise mountains time-lapse"],
+}
+
+for _c in CENAS:
+    if _c.id in _VIDEOS:
+        _c.videos = _VIDEOS[_c.id]
+    if _c.id in _ATRIBUICOES_3D:
+        _c.cena3d = _ATRIBUICOES_3D[_c.id]
+    if _c.id in _PARALAXE:
+        _c.paralaxe = _PARALAXE[_c.id]

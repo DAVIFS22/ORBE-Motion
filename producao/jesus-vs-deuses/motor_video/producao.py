@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import json
-import shlex
-import sys
 import time
 from collections import Counter
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 
 from . import VERSAO_MOTOR
 from . import asset_manager as am
+from . import blender_bridge as bb
+from . import geodados
 from . import audio_mixer, image_research, media_ingestion, procedural_art, project_report, quality_checker
 from . import script_analyzer as sa
 from . import storyboard as sb
@@ -52,9 +53,10 @@ def _ler_alinhamento(cfg: Config, entradas, avisos: list[str], duracao_audio: fl
     return sa.alinhar(texto, cues), texto, cues
 
 
-def _pesquisar_imagens(cfg: Config, planejadas, gerenciador: am.GerenciadorAssets, entradas) -> tuple[dict, str]:
+def _pesquisar_imagens(cfg: Config, planejadas, gerenciador: am.GerenciadorAssets, entradas) -> tuple[dict, dict, str]:
     """Obtém as imagens de cada cena. Devolve ({cena: [Asset]}, descrição do estado da rede)."""
     por_cena: dict[str, list[am.Asset]] = {}
+    videos: dict[str, am.Asset] = {}
     http = gerenciador.http
     estado_rede = ""
     online = http is not None and not cfg.offline
@@ -83,8 +85,9 @@ def _pesquisar_imagens(cfg: Config, planejadas, gerenciador: am.GerenciadorAsset
                 achadas.append(gerenciador.importar_local(arq, c.id))
             except am.ImagemInvalida as e:
                 gerenciador.registrar_falha(c.id, None, f"imagem local {arq.name}: {e}")
-        faltam = cp.planos_desejados - len(achadas)
-        log().info("[%d/%d] %s: %d plano(s), %d imagem(ns) locais%s", i, total, c.id, cp.planos_desejados, len(achadas),
+        faltam = cp.planos_desejados - len(achadas) - (1 if cp.reserva_3d else 0)
+        log().info("[%d/%d] %s: %d plano(s)%s, %d imagem(ns) locais%s", i, total, c.id, cp.planos_desejados,
+                   " (1 em 3D)" if cp.reserva_3d else "", len(achadas),
                    "" if provedores else " (sem pesquisa online)")
         if faltam > 0 and provedores and c.consultas:
             achadas += am.obter_imagens_para_cena(c.id, c.consultas, faltam, gerenciador, provedores,
@@ -94,8 +97,53 @@ def _pesquisar_imagens(cfg: Config, planejadas, gerenciador: am.GerenciadorAsset
             gerenciador.registrar_pendencia(c.id, f"{motivo}; faltam {faltam} de {cp.planos_desejados} imagem(ns)",
                                             [q["q"] for q in c.consultas])
         por_cena[c.id] = achadas
+        if provedores and c.videos and not cp.reserva_3d:
+            plano0 = cp.duracao / max(1, cp.planos_desejados)
+            v = am.obter_videos_para_cena(c.id, c.videos, plano0 + 2.2, gerenciador, provedores)
+            if v is not None:
+                videos[c.id] = v
+                log().info("   + filmagem: %s (%.0fs, %s)", v.titulo[:60], v.duracao, v.licenca)
     gerenciador.salvar()
-    return por_cena, estado_rede
+    return por_cena, videos, estado_rede
+
+
+def _cenas_3d(cfg: Config, blender, pedidos, tl, gerenciador, avisos, etapas) -> bool:
+    """Planeja e renderiza as cenas 3D (prioridade + orçamento). Devolve True se o fluxo deve parar aqui."""
+    if not pedidos:
+        log().info("Nenhuma cena 3D elegível (prioridade %d, Blender %s).", cfg.prioridade_3d, "ok" if blender else "ausente")
+        return cfg.listar_3d or cfg.so_3d
+    pasta_temp = cfg.pasta(PASTAS["temp"])
+    pasta_clipes = cfg.pasta(PASTAS["timeline"]) / "clipes-3d"
+    pasta_clipes.mkdir(parents=True, exist_ok=True)
+    if any(p.cena == "mapa_3d" for p in pedidos):
+        geo = geodados.obter_terras(gerenciador.pasta / "geodados", gerenciador.http)
+        for p in pedidos:
+            if p.cena == "mapa_3d" and geo:
+                p.params["geojson"] = str(geo)
+    bb.planejar(pedidos, cfg, blender, pasta_temp, cfg.pasta(PASTAS["timeline"]) / "medidas-3d.json")
+    print_plano = bb.descrever_plano(pedidos, cfg)
+    log().info("\n%s", print_plano)
+    if cfg.listar_3d:
+        return True
+    selecionados = [p for p in sorted(pedidos, key=lambda p: (p.prioridade, p.plano_id)) if p.status == "selecionado"]
+    for i, p in enumerate(selecionados, 1):
+        ultimo = {"pct": -10}
+
+        def prog(feitos, total, p=p, i=i, ultimo=ultimo):
+            pct = int(100 * feitos / max(1, total))
+            if pct - ultimo["pct"] >= 10 or feitos == total:
+                ultimo["pct"] = pct
+                log().info("   [3D %d/%d] %s (%s): quadro %d/%d (%d%%)", i, len(selecionados), p.plano_id, p.cena, feitos, total, pct)
+        log().info("[3D %d/%d] %s -> %s, %.1fs de clipe, estimativa %.1f min", i, len(selecionados), p.plano_id, p.cena, p.duracao, p.estimativa_s / 60)
+        try:
+            bb.renderizar_pedido(blender, p, cfg, pasta_clipes, pasta_temp, cfg.fps, prog, gerenciador.pasta)
+            log().info("   pronto em %.0fs (%s)", p.tempo_real_s, p.status)
+        except bb.ErroBlender as e:
+            p.status, p.detalhe = "falhou", str(e)[:400]
+            avisos.append(f"Cena 3D {p.plano_id} ({p.cena}) falhou; o plano usa a alternativa visual. {str(e)[:200]}")
+            log().warning("   FALHOU: %s", str(e)[:300])
+    tb.aplicar_clipes_3d(tl, pedidos, cfg.fps, cfg.creditos_na_tela)
+    return cfg.so_3d
 
 
 def produzir(cfg: Config, pasta_entrada: Path | None = None, comando: str = "") -> int:
@@ -126,23 +174,35 @@ def produzir(cfg: Config, pasta_entrada: Path | None = None, comando: str = "") 
 
         etapas.inicio("3/9 Storyboard e planejamento das cenas")
         cenas, secoes = sb.carregar(cfg.storyboard)
-        planejadas = tb.planejar_cenas(al, cenas, duracao_video, cfg.plano_alvo_s, avisos)
+        blender = bb.localizar_blender(cfg.blender) if cfg.prioridade_3d > 0 else None
+        if cfg.prioridade_3d > 0 and blender is None:
+            avisos.append("Blender não encontrado: as cenas 3D foram desativadas e os planos usam imagens/cenários alternativos. "
+                          "Instale o Blender (https://www.blender.org) ou 'pip install bpy' e informe --blender, se necessário.")
+        cfg3d = {"blender_ok": blender is not None, "prioridade": cfg.prioridade_3d}
+        planejadas = tb.planejar_cenas(al, cenas, duracao_video, cfg.plano_alvo_s, avisos, cfg3d)
         log().info("%d cenas ancoradas no roteiro; %d planos desejados", len(planejadas), sum(c.planos_desejados for c in planejadas))
 
         etapas.inicio("4/9 Pesquisa e download de imagens")
         http = None if cfg.offline else image_research.ClienteHTTP()
         gerenciador = am.GerenciadorAssets(cfg.pasta(PASTAS["imagens"]), http)
-        por_cena, estado_rede = _pesquisar_imagens(cfg, planejadas, gerenciador, entradas)
+        por_cena, videos_cena, estado_rede = _pesquisar_imagens(cfg, planejadas, gerenciador, entradas)
         n_img = sum(len(v) for v in por_cena.values())
         log().info("%d imagem(ns) válidas em %d cena(s); %d pendência(s)", n_img, sum(1 for v in por_cena.values() if v),
                    len(gerenciador.pendencias))
 
         etapas.inicio("5/9 Linha do tempo")
         _, pontos = procedural_art.mapa_esquematico()
-        tl = tb.construir(al, planejadas, secoes, por_cena, duracao_audio, duracao_video, cfg.fps, cfg.creditos_na_tela, avisos, pontos)
+        tl = tb.construir(al, planejadas, secoes, por_cena, duracao_audio, duracao_video, cfg.fps, cfg.creditos_na_tela, avisos, pontos, cfg3d, videos_cena)
         pasta_tl = cfg.pasta(PASTAS["timeline"])
-        salvar_json(pasta_tl / "linha-do-tempo.json", tl.para_dict())
         log().info("%d planos cobrindo 0 – %.2f s", len(tl.planos), tl.duracao_video)
+
+        etapas.inicio("5b/9 Cenas 3D (Blender), pontuais e por prioridade")
+        pedidos = tb.coletar_pedidos_3d(tl, cfg.limite_segundos)
+        parar = _cenas_3d(cfg, blender, pedidos, tl, gerenciador, avisos, etapas)
+        salvar_json(pasta_tl / "linha-do-tempo.json", tl.para_dict())
+        salvar_json(pasta_tl / "cenas-3d.json", [asdict(p) for p in pedidos])
+        if parar:
+            return 0
 
         etapas.inicio("6/9 Legendas")
         legendas = sg.gerar(al, duracao_audio, avisos)
@@ -176,7 +236,8 @@ def produzir(cfg: Config, pasta_entrada: Path | None = None, comando: str = "") 
                                         pasta_temp / "procedural")
         etapas.fim()
 
-        assets = [a.__dict__ for a in gerenciador.assets.values() if a.id in {x for p in tl.planos for x in [p.asset_id] if x}]
+        assets = [a.__dict__ for a in gerenciador.assets.values()
+                  if a.id in {p.asset_id for p in tl.planos if p.asset_id} | {p.fundo.get("asset_id") for p in tl.planos if p.fundo.get("asset_id")}]
         ctx = {
             "versao": VERSAO_MOTOR, "gerado_em": datetime.now().isoformat(timespec="seconds"), "validacao": cfg.validacao,
             "cfg": cfg.para_dict(), "entradas": entradas.para_dict() | {"narracao_tratada": entradas.narracao_tratada},
@@ -189,7 +250,10 @@ def produzir(cfg: Config, pasta_entrada: Path | None = None, comando: str = "") 
             "assets": assets, "pendencias": gerenciador.pendencias, "falhas_download": gerenciador.falhas, "rede": estado_rede,
             "audio": {"narracao_rms_db": narr["rms_ativo_db"], "narracao_pico_db": narr["pico_db"], "fontes": stems["fontes"],
                       "mix_lufs": info_mix["entrada"]["input_i"], "alvo_lufs": info_mix["alvo_lufs"], "true_peak": info_mix["true_peak_max"]},
-            "render": stats, "qc": res.para_dict(), "tempos": etapas.tempos, "comando": comando,
+            "render": stats, "qc": res.para_dict(), "cenas3d": [asdict(p) for p in pedidos],
+            "blender": (f"{blender.tipo}: {blender.caminho} (versão {blender.versao})" if blender else None),
+            "config3d": {"prioridade": cfg.prioridade_3d, "qualidade": cfg.qualidade_3d, "dispositivo": cfg.dispositivo_3d,
+                         "motor": cfg.motor_3d, "orcamento_min": cfg.orcamento_3d_min}, "tempos": etapas.tempos, "comando": comando,
             "video": str(destino), "video_mb": destino.stat().st_size / 1e6 if destino.is_file() else 0,
             "duracao_video_s": min(tl.duracao_video, cfg.limite_segundos or tl.duracao_video),
             "srt": str(srt), "n_legendas": len(legendas), "timeline_json": str(pasta_tl / "linha-do-tempo.json"), "log": str(arquivo_log),

@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
-from PIL import Image, ImageChops, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter
 
 LARGURA_BASE, ALTURA_BASE = 2400, 1350
 

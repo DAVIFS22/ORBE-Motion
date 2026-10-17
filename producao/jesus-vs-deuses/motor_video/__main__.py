@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shlex
 import sys
 from pathlib import Path
@@ -11,7 +12,7 @@ from .config import Config, ErroProducao
 
 
 def _caminho(p: str | None) -> Path | None:
-    return Path(p).expanduser().resolve() if p else None
+    return Path(os.path.abspath(Path(p).expanduser())) if p else None  # abspath: não segue links (venv/Python do bpy)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -43,6 +44,18 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--interativo", action="store_true", help="Pergunta qual arquivo usar quando houver vários.")
     p.add_argument("--rapido", action="store_true", help="Amostragem bilinear (mais rápida, para testes).")
     p.add_argument("--validacao", action="store_true", help="Marca o resultado como validação (narração-guia, não real).")
+    g3 = p.add_argument_group("animação 3D (Blender), somente pontual")
+    g3.add_argument("--prioridade-3d", type=int, default=2, choices=[0, 1, 2, 3],
+                    help="0 = sem 3D; 1 = só cenas essenciais (P1); 2 = P1 + P2 quando não houver imagem real (padrão); 3 = tudo, "
+                         "inclusive paralaxe 2.5D em fotos.")
+    g3.add_argument("--qualidade-3d", default="previa", choices=["teste", "previa", "padrao", "alta"],
+                    help="Resolução/amostras do render 3D (o clipe sempre é entregue em 1920x1080).")
+    g3.add_argument("--orcamento-3d", type=float, metavar="MIN", help="Máximo de minutos de render 3D (estimados); corta por prioridade.")
+    g3.add_argument("--dispositivo-3d", default="cpu", choices=["cpu", "gpu"], help="gpu cai para cpu se não houver GPU utilizável.")
+    g3.add_argument("--motor-3d", default="cycles", choices=["cycles", "eevee"], help="Cycles (padrão, qualquer máquina) ou EEVEE (precisa de OpenGL/GPU).")
+    g3.add_argument("--blender", help="Caminho do blender(.exe) ou de um Python com o módulo bpy. Padrão: detecta sozinho.")
+    g3.add_argument("--listar-3d", action="store_true", help="Mostra o plano das cenas 3D com estimativas de tempo e para.")
+    g3.add_argument("--so-3d", action="store_true", help="Renderiza apenas as cenas 3D (cache reaproveitado depois) e para.")
 
     g = sub.add_parser("narracao-guia", help="Gera uma narração-guia SINTÉTICA (ruído) a partir do VTT, só para testes.")
     g.add_argument("--transcricao", required=True)
@@ -94,6 +107,9 @@ def main(argv: list[str] | None = None) -> int:
             offline=args.offline, legendas_queimadas=args.legendas_queimadas, limite_segundos=args.previa,
             loudness_alvo=args.loudness, manter_temporarios=args.manter_temporarios, creditos_na_tela=not args.sem_creditos_na_tela,
             interativo=args.interativo, rapido=args.rapido, validacao=args.validacao,
+            prioridade_3d=args.prioridade_3d, qualidade_3d=args.qualidade_3d, orcamento_3d_min=args.orcamento_3d,
+            dispositivo_3d=args.dispositivo_3d, motor_3d={"cycles": "CYCLES", "eevee": "BLENDER_EEVEE"}[args.motor_3d],
+            blender=_caminho(args.blender), listar_3d=args.listar_3d, so_3d=args.so_3d,
         )
         if args.trabalhadores:
             cfg.trabalhadores = max(1, args.trabalhadores)

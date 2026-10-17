@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageChops, ImageEnhance, ImageFilter, ImageOps
+from PIL import Image, ImageChops, ImageEnhance, ImageFilter
 
 from . import procedural_art, text_graphics as tg
 
@@ -208,9 +208,14 @@ def calcular_camera(src_w: int, src_h: int, preset: str, intensidade: float = 1.
 
 def aplicar_grade(img: Image.Image, nome: str, auto_contraste: bool = True) -> Image.Image:
     g = GRADES.get(nome, GRADES["neutro"])
-    if auto_contraste:
-        img = ImageOps.autocontrast(img, cutoff=0.3)
     a = np.asarray(img, np.float32) / 255.0
+    if auto_contraste:
+        # estica só a luminância (mesmo fator nos três canais): preserva o matiz de pores do sol, céus, etc.
+        lum = (a * np.array([0.299, 0.587, 0.114], np.float32)).sum(axis=2)
+        lo, hi = np.percentile(lum[::4, ::4], [0.3, 99.7])
+        if hi - lo > 0.08:
+            fator = min(1.0 / (hi - lo), 1.5)
+            a = 0.65 * np.clip((a - lo) * fator, 0, 1) + 0.35 * a
     a = a * np.array(g["tint"], np.float32)
     lum = (a * np.array([0.299, 0.587, 0.114], np.float32)).sum(axis=2, keepdims=True)
     a = lum + (a - lum) * g["sat"]
@@ -246,6 +251,68 @@ def _grao(w: int, h: int, n: int = 6, amplitude: int = AMPLITUDE_GRAO):
             for _ in range(n)]
 
 
+class FonteVideo:
+    """Quadros de um vídeo (clipe 3D renderizado ou filmagem licenciada), lidos sequencialmente pelo FFmpeg.
+
+    Acesso aleatório (verificação de qualidade) reabre o decodificador na posição pedida.
+    """
+
+    def __init__(self, arquivo: str, inicio_clip: float, span: float, w: int, h: int, fps: int):
+        self.arquivo, self.inicio, self.span = arquivo, inicio_clip, span
+        self.w, self.h, self.fps = w, h, fps
+        self.n = max(1, int(round(span * fps)))
+        self._proc = None
+        self._idx = -1
+        self._ultimo: Image.Image | None = None
+
+    def _abrir(self, k: int):
+        import subprocess
+        self.fechar()
+        t0 = self.inicio + k / self.fps
+        filtro = (f"scale={self.w}:{self.h}:force_original_aspect_ratio=increase:flags=lanczos:in_color_matrix=bt709:"
+                  f"in_range=limited:out_range=full,crop={self.w}:{self.h},fps={self.fps},format=rgb24")
+        self._proc = subprocess.Popen(
+            ["ffmpeg", "-v", "error", "-ss", f"{t0:.4f}", "-i", self.arquivo, "-an", "-vf", filtro, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=self.w * self.h * 3 * 2)
+        self._idx = k - 1
+
+    def _ler(self):
+        n = self.w * self.h * 3
+        dados = self._proc.stdout.read(n)
+        if len(dados) < n:
+            return None
+        return Image.frombytes("RGB", (self.w, self.h), dados)
+
+    def quadro(self, p: float) -> Image.Image:
+        k = max(0, min(self.n - 1, int(round(p * self.span * self.fps))))
+        if k == self._idx and self._ultimo is not None:
+            return self._ultimo
+        if self._proc is None or k < self._idx or k > self._idx + 900:
+            self._abrir(k)
+        while self._idx < k:
+            img = self._ler()
+            if img is None:  # fim do vídeo: mantém o último quadro
+                break
+            self._ultimo = img
+            self._idx += 1
+        if self._ultimo is None:
+            self._ultimo = Image.new("RGB", (self.w, self.h), (0, 0, 0))
+        return self._ultimo
+
+    def fechar(self):
+        if self._proc is not None:
+            try:
+                self._proc.kill()
+                self._proc.stdout.close()
+                self._proc.wait()
+            except Exception:  # noqa: BLE001
+                pass
+            self._proc = None
+
+    def __del__(self):
+        self.fechar()
+
+
 class FonteVisual:
     """Fonte de imagem preparada (cor, escala) + câmera, pronta para amostrar quadros."""
 
@@ -253,6 +320,11 @@ class FonteVisual:
                  rapido: bool = False):
         self.w, self.h = w, h
         self._rs = Image.BILINEAR if rapido else Image.BICUBIC
+        self._video = None
+        if fundo.get("tipo") == "video":
+            self._video = FonteVideo(fundo["arquivo"], float(fundo.get("inicio_clip", 0.0)), duracao, w, h, int(fundo.get("fps", 30)))
+            self.foco, self.camera = None, None
+            return
         img, foco_auto = self._carregar(fundo, cache)
         self.foco = tuple(camera["foco"]) if camera.get("foco") else (foco_auto if fundo.get("tipo") == "imagem" else None)
         src_w, src_h = img.size
@@ -306,8 +378,14 @@ class FonteVisual:
         self._fit = min(0.94 * h / src.height, 0.94 * w / src.width)
         self._fg = src
 
+    def fechar(self):
+        if self._video is not None:
+            self._video.fechar()
+
     def quadro(self, p: float) -> Image.Image:
         w, h = self.w, self.h
+        if self._video is not None:
+            return self._video.quadro(p)
         if self.camera.layout == "contain":
             return self._quadro_contain(p)
         x, y, cw, ch = self._cam_px.retangulo(p)
@@ -386,6 +464,8 @@ def construir_overlays(specs: list[dict], w: int, h: int, dur_plano: float) -> l
             saida.append(Overlay(tg.numero_ponto(int(s["numero"]), s["rotulo"], w, h), t0, dur, gradiente=0.6))
         elif tipo == "credito":
             saida.append(Overlay([tg.selo_credito(s["texto"], w, h)], t0, dur))
+        elif tipo == "rotulo":
+            saida.append(Overlay([tg.rotulo_arte(s["texto"], w, h)], t0, dur, gradiente=0.35))
         else:
             raise ValueError(f"Tipo de overlay desconhecido: {tipo}")
     return saida
@@ -459,11 +539,18 @@ class Compositor:
         self._legendas = legendas or []
         self._leg_cache: dict[str, tg.Camada] = {}
 
+    def fechar(self):
+        """Encerra os decodificadores de vídeo abertos."""
+        for r in self._cache_r.values():
+            r.fonte.fechar()
+        self._cache_r.clear()
+
     def _renderizador(self, i: int) -> RenderizadorPlano:
         if i not in self._cache_r:
             if len(self._cache_r) > 3:  # mantém só alguns planos vizinhos na memória
                 for k in sorted(self._cache_r)[:-2]:
                     if abs(k - i) > 1:
+                        self._cache_r[k].fonte.fechar()
                         del self._cache_r[k]
             self._cache_r[i] = RenderizadorPlano(self.planos[i], self.w, self.h, self.cache, self.rapido)
         return self._cache_r[i]

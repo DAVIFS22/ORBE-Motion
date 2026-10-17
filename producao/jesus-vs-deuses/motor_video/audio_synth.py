@@ -184,6 +184,21 @@ def natureza_discreta(dur: float, semente: int = 6):
     return (vento(dur, 0.55, semente, brilho=1.1) * 0.9 + passaros(dur, semente + 1, 0.07) * 0.08).astype(np.float32)
 
 
+def textura_crescente(dur: float, semente: int = 11):
+    """Textura delicada que cresce devagar (ar brilhante + parciais agudos suaves): usada na abertura do túmulo."""
+    n = _alocar(dur)
+    t = np.arange(n, dtype=np.float32) / SR
+    rng = _rng(semente)
+    cresc = (t / max(dur, 1e-3)) ** 1.8
+    saida = np.zeros((n, 2), np.float32)
+    for c in range(2):
+        ar = _ruido_banda(n, 2500, 9000, rng, 2) * 0.45
+        parciais = sum(np.sin(2 * math.pi * fr * t + c + k) * (0.5 + 0.5 * np.sin(2 * math.pi * (0.05 + 0.017 * k) * t + k))
+                       for k, fr in enumerate((f("D5"), f("A5"), f("F#5"), f("D6")))) * 0.18
+        saida[:, c] = (ar + parciais) * cresc
+    return _normalizar_rms(saida, 0.1)
+
+
 BEDS = {
     "vento_profundo": lambda d, s: vento(d, 0.7, s, brilho=0.7),
     "vento_suave": lambda d, s: vento(d, 0.5, s, brilho=0.9),
@@ -196,6 +211,7 @@ BEDS = {
     "grave_sutil": lambda d, s: grave(d, "D1", s, 0.09),
     "aldeia": lambda d, s: aldeia(d, s),
     "natureza_discreta": lambda d, s: natureza_discreta(d, s),
+    "textura_crescente": lambda d, s: textura_crescente(d, s),
 }
 
 

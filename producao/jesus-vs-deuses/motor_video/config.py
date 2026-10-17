@@ -8,7 +8,7 @@ import os
 import shutil
 import subprocess
 import sys
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -49,6 +49,15 @@ class Config:
     rapido: bool = False  # amostragem bilinear (testes); o padrão é bicúbica
     validacao: bool = False  # narração-guia sintética: o resultado é só uma validação do motor
     nome_saida: str = "jesus-contra-todos-os-deuses"
+    # animação 3D (Blender): pontual, por prioridade e com orçamento de tempo de renderização
+    prioridade_3d: int = 2          # 0 = sem 3D; 1 = só P1; 2 = P1 + P2 quando faltar imagem real; 3 = tudo
+    qualidade_3d: str = "previa"    # teste | previa | padrao | alta
+    orcamento_3d_min: float | None = None  # minutos de render 3D (estimados); None = sem limite
+    dispositivo_3d: str = "cpu"     # cpu | gpu (gpu cai para cpu se não houver GPU utilizável)
+    motor_3d: str = "CYCLES"        # CYCLES | BLENDER_EEVEE
+    blender: Path | None = None     # executável do Blender ou Python com o módulo bpy
+    so_3d: bool = False             # renderiza apenas as cenas 3D e para
+    listar_3d: bool = False         # mostra o plano 3D (com estimativas) e para
 
     def para_dict(self) -> dict:
         d = asdict(self)

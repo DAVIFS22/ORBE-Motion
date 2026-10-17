@@ -167,9 +167,9 @@ def _sincronia_audio(video: Path, narracao_wav: Path, narr: dict, res: Resultado
     dur = min(len(ref), len(sig)) / taxa
     if limite_s:
         dur = min(dur, limite_s)
-    janela = 20.0
-    # janelas centradas em trechos com fala contínua, distribuídas ao longo do vídeo
-    pontos = np.linspace(janela, max(janela, dur - janela - 1), 7)
+    janela = min(20.0, max(1.5, dur / 3))        # em vídeos curtos (testes), janelas menores
+    # janelas em trechos com fala contínua, distribuídas ao longo do vídeo
+    pontos = np.linspace(min(janela, 0.4 * dur), max(janela, dur - janela - 1), 7)
     lags = []
     for p in pontos:
         i0, i1 = int(p * res_hz), int((p + janela) * res_hz)
@@ -223,7 +223,7 @@ def _quadros_vs_timeline(video: Path, tl: Timeline, cfg: Config, pasta_imagens: 
         return
     planos = tl.planos_dict()
     for p in planos:
-        if p["fundo"].get("arquivo"):
+        if p["fundo"].get("arquivo") and (p["fundo"].get("tipo") == "imagem" or p["fundo"].get("relativo_imagens")):
             p["fundo"]["arquivo"] = str((pasta_imagens / p["fundo"]["arquivo"]).resolve())
     comp = Compositor(planos, w, h, cfg.fps, tl.duracao_video, cache_proc, rapido=True, grao=False)
     ruins, medias = [], []
@@ -242,6 +242,7 @@ def _quadros_vs_timeline(video: Path, tl: Timeline, cfg: Config, pasta_imagens: 
             ruins.append((pid, "quadro preto", r))
         elif r < 0.80:
             ruins.append((pid, f"correlação {r:.2f}", r))
+    comp.fechar()
     if ruins:
         res.add("quadros x linha do tempo", "falha",
                 f"{len(ruins)} de {len(amostras)} quadros não correspondem ao previsto: " + "; ".join(f"{p} ({m})" for p, m, _ in ruins[:5]))
@@ -308,13 +309,16 @@ def verificar(video: Path, narracao_wav: Path, narr: dict, tl: Timeline, cfg: Co
     except ErroProducao as e:
         res.add("quadros x linha do tempo", "falha", str(e))
 
-    faltando = [p.id for p in tl.planos if p.fundo.get("arquivo") and not (pasta_imagens / p.fundo["arquivo"]).is_file()]
+    faltando = [p.id for p in tl.planos if p.fundo.get("arquivo") and not (
+        (pasta_imagens / p.fundo["arquivo"]).is_file() if (p.fundo.get("tipo") == "imagem" or p.fundo.get("relativo_imagens"))
+        else Path(p.fundo["arquivo"]).is_file())]
     if faltando:
         res.add("imagens da linha do tempo", "falha", f"arquivo ausente para: {faltando[:5]}")
     else:
-        n_img = sum(1 for p in tl.planos if p.fundo.get("arquivo"))
-        res.add("imagens da linha do tempo", "ok", f"{n_img} plano(s) com imagem baixada (todos os arquivos existem); "
-                f"{len(tl.planos) - n_img} com cenário gerado por código")
+        n_img = sum(1 for p in tl.planos if p.fundo.get("tipo") == "imagem")
+        n_vid = sum(1 for p in tl.planos if p.fundo.get("tipo") == "video")
+        res.add("imagens da linha do tempo", "ok", f"{n_img} plano(s) com imagem baixada, {n_vid} com vídeo (cena 3D/filmagem); "
+                f"todos os arquivos existem; {len(tl.planos) - n_img - n_vid} com cenário gerado por código")
 
     if legendas_srt is not None and legendas_srt.is_file():
         lg = sg.ler_srt(legendas_srt)

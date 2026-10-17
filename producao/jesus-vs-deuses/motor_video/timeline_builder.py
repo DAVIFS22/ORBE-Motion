@@ -29,6 +29,7 @@ class CenaPlanejada:
     palavra_ini: int
     ancora_confiavel: bool
     planos_desejados: int = 1
+    reserva_3d: bool = False  # o 1º plano será uma cena 3D (não precisa de imagem)
 
     @property
     def duracao(self) -> float:
@@ -52,6 +53,7 @@ class Plano:
     fonte: dict
     asset_id: str | None = None
     movimento: str = ""
+    cena3d: dict | None = None  # pedido de cena 3D (Blender) para este plano, se elegível
 
     @property
     def duracao(self) -> float:
@@ -81,8 +83,13 @@ class Timeline:
 
 # --------------------------------------------------------------- planejar ---
 
+def _usa_3d_sempre(c: Cena, cfg3d: dict | None) -> bool:
+    s = c.cena3d
+    return bool(s and cfg3d and cfg3d.get("blender_ok") and s["modo"] == "sempre" and s["prioridade"] <= cfg3d["prioridade"])
+
+
 def planejar_cenas(al: sa.Alinhamento, cenas: list[Cena], duracao_video: float, plano_alvo_s: float = 11.0,
-                   avisos: list[str] | None = None) -> list[CenaPlanejada]:
+                   avisos: list[str] | None = None, cfg3d: dict | None = None) -> list[CenaPlanejada]:
     avisos = avisos if avisos is not None else []
     brutas: list[CenaPlanejada] = []
     pos = 0
@@ -114,6 +121,7 @@ def planejar_cenas(al: sa.Alinhamento, cenas: list[Cena], duracao_video: float, 
     for cp in resultado:
         alvo = RITMOS[cp.cena.ritmo] if cp.cena.ritmo != "normal" else plano_alvo_s
         cp.planos_desejados = _quantos_planos(cp, alvo)
+        cp.reserva_3d = _usa_3d_sempre(cp.cena, cfg3d) and cp.duracao / max(1, cp.planos_desejados) >= MIN_PLANO_S
     return resultado
 
 
@@ -165,6 +173,7 @@ def construir(
     al: sa.Alinhamento, planejadas: list[CenaPlanejada], secoes: dict[str, Secao],
     assets_por_cena: dict[str, list[Asset]], duracao_audio: float, duracao_video: float, fps: int,
     creditos_na_tela: bool = True, avisos: list[str] | None = None, mapa_pontos: dict | None = None,
+    cfg3d: dict | None = None, videos_por_cena: dict[str, Asset] | None = None,
 ) -> Timeline:
     avisos = avisos if avisos is not None else []
     planos: list[Plano] = []
@@ -180,15 +189,26 @@ def construir(
             n = max(1, min(n_w, math.ceil(cp.duracao / (1.7 * 11.0))))
         n = max(1, min(n, int(cp.duracao // MIN_PLANO_S) or 1))
         cortes = _cortes(al, cp.inicio, cp.fim, n)
+        desloc = 1 if cp.reserva_3d else 0   # com 3D reservado no plano 0, as imagens vão para os planos seguintes
         for k in range(n):
             ini, fim = cortes[k], cortes[k + 1]
-            asset = assets[k] if k < len(assets) else None
+            idx_img = k - desloc
+            asset = assets[idx_img] if 0 <= idx_img < len(assets) else None
+            if cp.reserva_3d and k == 0:
+                asset = None
             semente += 7
             preset = _escolher_preset(c.camera, k, ultimo_preset, asset)
             ultimo_preset = preset
             intens = 1.0 if c.ritmo != "lento" else 0.8
             camera = {"preset": preset, "intensidade": intens}
-            if asset is not None:
+            video = (videos_por_cena or {}).get(c.id) if k == 0 and not cp.reserva_3d else None
+            if video is not None and video.duracao >= (fim - ini) + 2.2:
+                asset = video  # filmagem licenciada (precisa durar mais que o plano, com folga para as transições)
+                fundo = {"tipo": "video", "arquivo": video.arquivo_trabalho, "relativo_imagens": True, "inicio_clip": 0.0, "fps": fps,
+                         "asset_id": video.id}
+                fonte = {"origem": video.fonte, "titulo": video.titulo, "autor": video.autor, "licenca": video.licenca,
+                         "url": video.url_pagina or video.url_arquivo, "natureza": video.natureza, "gerada_por_codigo": False}
+            elif asset is not None:
                 fundo = {"tipo": "imagem", "arquivo": asset.arquivo_trabalho, "asset_id": asset.id}
                 fonte = {"origem": asset.fonte, "titulo": asset.titulo, "autor": asset.autor, "licenca": asset.licenca,
                          "url": asset.url_pagina or asset.url_arquivo, "natureza": asset.natureza, "gerada_por_codigo": False}
@@ -210,11 +230,12 @@ def construir(
             if asset is not None and asset.exige_atribuicao and creditos_na_tela:
                 overlays.append({"tipo": "credito", "texto": _credito_tela(asset), "atraso": 1.0,
                                  "duracao": max(1.0, min(6.0, (fim - ini) - 1.6))})
+            pedido3d = _pedido_3d(c, k, asset, fim - ini, cfg3d, creditos_na_tela)
             plano = Plano(
                 id=f"{c.id}#{k + 1}", cena_id=c.id, secao=c.secao, inicio=ini, fim=fim,
                 narracao=sa.texto_entre(al, ini, fim), descricao=c.descricao, fundo=fundo, camera=camera, cor=c.cor,
                 transicao_entrada={"tipo": "corte", "duracao": 0.0}, overlays=overlays, fonte=fonte,
-                asset_id=asset.id if asset else None, movimento=preset,
+                asset_id=asset.id if asset else None, movimento=preset, cena3d=pedido3d,
             )
             planos.append(plano)
             if k == 0 and len(planos) > 1:
@@ -227,6 +248,20 @@ def construir(
     tl = Timeline(duracao_audio, duracao_video, fps, planos, eventos, sec, list(avisos))
     validar(tl)
     return tl
+
+
+def _pedido_3d(c: Cena, k: int, asset: Asset | None, dur: float, cfg3d: dict | None, creditos: bool) -> dict | None:
+    """Pedido de cena 3D para o plano k, se a política (prioridade, modo, Blender disponível) permitir."""
+    if not cfg3d or not cfg3d.get("blender_ok") or dur < MIN_PLANO_S:
+        return None
+    s = c.cena3d
+    if s and k == s.get("plano", 0) and s["prioridade"] <= cfg3d["prioridade"]:
+        if s["modo"] == "sempre" or asset is None:
+            return {"cena": s["cena"], "prioridade": s["prioridade"], "modo": s["modo"], "params": dict(s.get("params", {}))}
+    if c.paralaxe is not None and asset is not None and cfg3d["prioridade"] >= 3 and k == 0:
+        return {"cena": "foto_2_5d", "prioridade": 3, "modo": "sempre",
+                "params": {"imagem": asset.arquivo_trabalho, "horizonte": c.paralaxe, "intensidade": 0.5, "_relativo_imagens": True}}
+    return None
 
 
 def _fonte_codigo(descricao: str) -> dict:
@@ -255,7 +290,7 @@ def _ajustar_transicoes(planos: list[Plano]):
         if i == 0 or t["tipo"] == "corte":
             continue
         limite = 0.35 * min(p.duracao, planos[i - 1].duracao)
-        t["duracao"] = round(min(t["duracao"], limite), 3)
+        t["duracao"] = math.floor(min(t["duracao"], limite) * 1000) / 1000  # nunca arredonda para cima do limite
         if t["duracao"] < 0.15:
             p.transicao_entrada = {"tipo": "corte", "duracao": 0.0}
 
@@ -302,6 +337,11 @@ def _eventos_audio(planejadas: list[CenaPlanejada], planos: list[Plano], secoes:
                 eventos.append({"t": t0, "tipo": "silencio", "dur": float(arg or 2.0), "cena": cp.cena.id})
             elif nome == "vento_forte":
                 eventos.append({"t": t0, "tipo": "vento_forte", "dur": cp.duracao, "cena": cp.cena.id})
+        tem_whoosh = any(x.startswith("whoosh") for x in cp.cena.sfx)
+        if (p0.transicao_entrada["tipo"] in ("dip_gold", "dip_white", "dip_black") and not tem_whoosh and t0 > 1.0
+                and cp.cena.secao not in ("5-morte", "6-crucificacao") and not any(x.startswith("silencio") for x in cp.cena.sfx)):
+            # transição importante: um whoosh discreto (as variantes se alternam no mixer)
+            eventos.append({"t": max(0.0, trans_ini), "tipo": "whoosh", "cena": cp.cena.id, "auto": True})
         if cp.cena.musica:
             eventos.append({"t": t0, "tipo": "musica_nivel", "modo": cp.cena.musica, "dur": cp.duracao, "cena": cp.cena.id})
     eventos.sort(key=lambda e: (e["t"], e["tipo"]))
@@ -326,3 +366,44 @@ def validar(tl: Timeline, tolerancia: float = 1e-3):
             raise ErroProducao(f"Plano {p.id} dura menos de um quadro.")
     if tl.duracao_video + 1e-6 < tl.duracao_audio:
         raise ErroProducao("O vídeo termina antes da narração.")
+
+
+# --------------------------------------------------------------- cenas 3D ---
+
+def coletar_pedidos_3d(tl: Timeline, limite: float | None = None) -> list:
+    """Pedidos de cena 3D da linha do tempo, com a duração de clipe necessária (plano + metade das transições)."""
+    from .blender_bridge import Pedido3D, semente_da_cena
+    from .storyboard_jesus import ROTULOS_3D
+    pedidos = []
+    for i, p in enumerate(tl.planos):
+        if not p.cena3d or (limite is not None and p.inicio >= limite):
+            continue
+        d_in = p.transicao_entrada["duracao"] if p.transicao_entrada["tipo"] != "corte" else 0.0
+        d_out = 0.0
+        if i + 1 < len(tl.planos):
+            prox = tl.planos[i + 1].transicao_entrada
+            d_out = prox["duracao"] if prox["tipo"] != "corte" else 0.0
+        c3 = p.cena3d
+        pedidos.append(Pedido3D(
+            plano_id=p.id, cena=c3["cena"], duracao=p.duracao + (d_in + d_out) / 2, prioridade=c3["prioridade"], modo=c3["modo"],
+            params=dict(c3["params"]), rotulo=ROTULOS_3D.get(c3["cena"], "Reconstrução artística em 3D, não é registro histórico"),
+            semente=semente_da_cena(p.id)))
+    return pedidos
+
+
+def aplicar_clipes_3d(tl: Timeline, pedidos: list, fps: int, creditos_na_tela: bool = True):
+    """Troca o fundo dos planos cujo clipe 3D foi gerado; os demais mantêm a imagem/cenário alternativo."""
+    por_id = {p.plano_id: p for p in pedidos}
+    for pl in tl.planos:
+        ped = por_id.get(pl.id)
+        if ped is None or ped.status not in ("renderizado", "reaproveitado") or not ped.clipe:
+            continue
+        pl.fundo = {"tipo": "video", "arquivo": ped.clipe, "fps": fps, "inicio_clip": 0.0, "origem": "cena3d", "cena3d": ped.cena}
+        pl.asset_id = None
+        pl.movimento = "câmera 3D (Blender)"
+        pl.overlays = [o for o in pl.overlays if o["tipo"] != "credito"]
+        pl.overlays.append({"tipo": "rotulo", "texto": ped.rotulo, "atraso": 0.8, "duracao": max(1.2, min(5.5, pl.duracao - 1.4))})
+        pl.fonte = {"origem": "Blender (cena 3D procedural gerada por código)", "titulo": f"{ped.cena}: {ped.rotulo}",
+                    "autor": "ORBE Motion (código)", "licenca": "obra própria, sem material de terceiros", "url": "",
+                    "natureza": "reconstrução/representação artística em 3D: não é fotografia nem registro histórico",
+                    "gerada_por_codigo": True, "cena3d": ped.cena, "prioridade_3d": ped.prioridade}

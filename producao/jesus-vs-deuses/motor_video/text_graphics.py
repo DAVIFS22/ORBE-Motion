@@ -282,3 +282,17 @@ def legenda_queimada(texto: str, w: int, h: int) -> Camada:
             y += int(f.size * 1.3)
     return _camada_de_texto(larg, alt, desenhar, sombra=5, h=h, pos=(int((w - larg) / 2), int(h * 0.9 - alt)),
                             entrada=0.0, saida=0.0, deslize=0)
+
+
+def rotulo_arte(texto: str, w: int, h: int) -> Camada:
+    """Rótulo discreto (canto inferior esquerdo) para reconstruções/representações artísticas."""
+    f = carregar_fonte("serif-it", False, int(h * 0.026))
+    while medir(texto, f) > w * 0.7 and len(texto) > 20:
+        texto = texto[:-4].rstrip() + "…"
+    larg = int(medir(texto, f)) + 8
+    alt = int(f.size * 1.5)
+
+    def desenhar(d, pad):
+        d.text((pad, pad), texto, font=f, fill=(244, 236, 220))
+
+    return _camada_de_texto(larg, alt, desenhar, sombra=6, h=h, pos=(int(w * 0.035), int(h * 0.925 - alt)), entrada=0.7, saida=0.7, deslize=0)

@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import VERSAO_MOTOR
-from .config import Config, ErroProducao, executar, ffprobe_json, log, salvar_json
+from .config import Config, ErroProducao, executar, log
 from .timeline_builder import Timeline
 
 BITRATE_ESTIMADO_MBPS = 14.0
@@ -143,6 +143,7 @@ def _trabalhador(tarefa: dict) -> None:
         obtido = _frames_do_arquivo(tmp)
         if obtido != esperado:
             raise ErroProducao(f"Bloco com {obtido} quadros; esperado {esperado}.")
+        comp.fechar()
         tmp.replace(saida)
         marca_ok.write_text(tarefa["chave"])
         marca_prog.write_text(str(total))
@@ -212,7 +213,7 @@ def renderizar_video(cfg: Config, tl: Timeline, pasta_imagens: Path, pasta_temp:
 
     planos = tl.planos_dict()
     for p in planos:  # caminhos absolutos: o renderizador só lê arquivos locais já validados
-        if p["fundo"].get("arquivo"):
+        if p["fundo"].get("arquivo") and (p["fundo"].get("tipo") == "imagem" or p["fundo"].get("relativo_imagens")):
             p["fundo"]["arquivo"] = str((pasta_imagens / p["fundo"]["arquivo"]).resolve())
     bloco_q = max(fps, int(round(cfg.segundos_por_bloco * fps)))
     tarefas = []

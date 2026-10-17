@@ -38,6 +38,9 @@ class Cena:
     lugar: str | None = None
     arquivos: list[str] = field(default_factory=list)  # títulos exatos do Commons (opcional)
     musica: str | None = None  # "baixo" | "normal" | "cresce" | "some"
+    cena3d: dict | None = None  # {"cena", "prioridade" (1..3), "modo" ("sempre"|"sem_imagem"), "plano", "params"}
+    paralaxe: float | None = None  # posição do horizonte (0..1) para paralaxe 2.5D de uma foto (P3)
+    videos: list[str] = field(default_factory=list)  # consultas de filmagens licenciadas (Commons) para o 1º plano
 
     def validar(self):
         if self.motivo not in MOTIVOS:
@@ -56,6 +59,9 @@ class Cena:
                 raise ErroProducao(f"Cena {self.id}: efeito desconhecido {s!r}")
         if not self.ancora.strip():
             raise ErroProducao(f"Cena {self.id}: âncora vazia")
+        if self.cena3d:
+            if self.cena3d.get("modo") not in ("sempre", "sem_imagem") or self.cena3d.get("prioridade") not in (1, 2, 3):
+                raise ErroProducao(f"Cena {self.id}: cena3d inválida {self.cena3d!r}")
 
 
 def _consulta(texto: str) -> dict:
@@ -66,12 +72,22 @@ def _consulta(texto: str) -> dict:
     return {"q": texto.strip(), "fontes": ["commons"]}
 
 
+def T3D(cena: str, prioridade: int = 2, modo: str = "sem_imagem", plano: int = 0, **params) -> dict:
+    """Cena 3D (Blender) para esta cena do storyboard.
+
+    prioridade 1 = essencial (abertura, reconstruções, momentos de impacto);
+    2 = desejável (usada quando não há imagem real adequada, `modo="sem_imagem"`); 3 = opcional.
+    """
+    return {"cena": cena, "prioridade": prioridade, "modo": modo, "plano": plano, "params": params}
+
+
 def C(id, secao, ancora, desc, q=(), motivo="ceu_estrelado", cam=("zoom_in",), cor="neutro", ritmo="normal",
-      trans="dissolve", ov=(), sfx=(), foco=None, mapa=False, lugar=None, arquivos=(), musica=None) -> Cena:
+      trans="dissolve", ov=(), sfx=(), foco=None, mapa=False, lugar=None, arquivos=(), musica=None, c3d=None,
+      paralaxe=None) -> Cena:
     return Cena(id=id, secao=secao, ancora=ancora, descricao=desc, consultas=[_consulta(x) for x in q],
                 motivo=motivo, camera=(cam,) if isinstance(cam, str) else tuple(cam), cor=cor, ritmo=ritmo,
                 transicao=trans, overlays=list(ov), sfx=list(sfx), foco=foco, mapa=mapa, lugar=lugar,
-                arquivos=list(arquivos), musica=musica)
+                arquivos=list(arquivos), musica=musica, cena3d=c3d, paralaxe=paralaxe)
 
 
 # Overlays ---------------------------------------------------------------

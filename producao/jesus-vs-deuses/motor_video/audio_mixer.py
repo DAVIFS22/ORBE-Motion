@@ -185,6 +185,7 @@ def construir_stems(tl: Timeline, narr: dict, pasta_audio: Path, pasta_musicas: 
     efeitos = np.memmap(raw_x, dtype=np.float32, mode="w+", shape=(N, 2))
     cm, cx = Curva(total), Curva(total)
     pontos_m: list[tuple[float, float]] = []
+    pontos_x: list[tuple[float, float]] = [(0.0, 0.0)]
     user_m, user_x = pasta_musicas or [], pasta_efeitos or []
     seed = 1
 
@@ -219,6 +220,8 @@ def construir_stems(tl: Timeline, narr: dict, pasta_audio: Path, pasta_musicas: 
         if clima == "encerramento":
             arp = _escalar_pico(syn.arpejo_piano(dur + 2.0, seed), ref - 8)
             _somar(musica, syn.fade(arp, 1.0, 3.0), ini)
+        if clima == "encerramento" and dur >= 6:   # efeitos e ambiência se retiram gradualmente até a pergunta final
+            pontos_x += [(ini + 1.0, 0.0), (fim - 6.0, -16.0)]
         a_db, b_db = {"ressurreicao": (-24.0, 0.0), "comparacao": (-7.0, 0.0), "crucificacao": (0.0, -11.0)}.get(clima, (0.0, 0.0))
         if not pontos_m:
             pontos_m.append((0.0, a_db))
@@ -273,6 +276,8 @@ def construir_stems(tl: Timeline, narr: dict, pasta_audio: Path, pasta_musicas: 
 
     pontos_m.append((total, pontos_m[-1][1] if pontos_m else 0.0))
     cm.chaves(pontos_m)
+    pontos_x.append((total, pontos_x[-1][1]))
+    cx.chaves(pontos_x)
     # ---- automações dos eventos ----
     for ev in tl.eventos_audio:
         t, dur = ev["t"], ev.get("dur", 0.0)
@@ -317,7 +322,7 @@ def construir_stems(tl: Timeline, narr: dict, pasta_audio: Path, pasta_musicas: 
 # ----------------------------------------------------------- mixagem final ---
 
 def mixar(narracao_wav: Path, canais_narracao: int, stem_musica: Path, stem_efeitos: Path, duracao_video: float,
-          narr: dict, destino: Path, alvo_lufs: float = -14.0, tp: float = -1.5) -> dict:
+          narr: dict, destino: Path, alvo_lufs: float = -14.0, tp: float = -1.5, normalizar: bool = True) -> dict:
     """Mix final em WAV 24 bits/48 kHz: ducking pela própria narração + ganho linear de loudness.
 
     Uma única passada pesada (sidechain + soma) grava um intermediário em float; o loudness é medido
@@ -344,7 +349,7 @@ def mixar(narracao_wav: Path, canais_narracao: int, stem_musica: Path, stem_efei
     if not integ or not pico:
         raise ErroProducao("Falha ao medir o loudness do mix.")
     lufs, tp_real = float(integ.group(1)), float(pico.group(1))
-    ganho = alvo_lufs - lufs
+    ganho = (alvo_lufs - lufs) if normalizar else 0.0
     ganho_limitado = min(ganho, tp - tp_real) if tp_real + ganho > tp else ganho
     aviso = None
     if ganho_limitado < ganho - 0.05:

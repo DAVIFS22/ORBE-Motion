@@ -15,6 +15,7 @@ com marca d'água declarada (nos metadados) também.
 from __future__ import annotations
 
 import html
+import http.client
 import json
 import math
 import re
@@ -75,13 +76,15 @@ class ClienteHTTP:
                 if e.code in (429, 500, 502, 503, 504):
                     espera = min(60.0, float(e.headers.get("Retry-After") or (2 ** tentativa)))
                     log().debug("HTTP %s em %s; aguardando %.1fs", e.code, url, espera)
-                    time.sleep(espera)
                     ultimo_erro = e
+                    if tentativa < self.tentativas - 1:
+                        time.sleep(espera)
                     continue
                 raise ErroProducao(f"HTTP {e.code} em {url}") from e
             except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as e:
                 ultimo_erro = e
-                time.sleep(min(8.0, 2 ** tentativa))
+                if tentativa < self.tentativas - 1:
+                    time.sleep(min(8.0, 2 ** tentativa))
         self._falhas_seguidas += 1
         raise RedeIndisponivel(f"Sem resposta de {url}: {ultimo_erro}")
 
@@ -95,16 +98,19 @@ class ClienteHTTP:
         parcial = destino.with_suffix(destino.suffix + ".part")
         total = 0
         try:
-            with self._abrir(url) as r, open(parcial, "wb") as f:
-                esperado = r.headers.get("Content-Length")
-                while True:
-                    bloco = r.read(1 << 16)
-                    if not bloco:
-                        break
-                    total += len(bloco)
-                    if total > max_bytes:
-                        raise ErroProducao(f"Arquivo maior que {max_bytes // (1 << 20)} MB: {url}")
-                    f.write(bloco)
+            try:
+                with self._abrir(url) as r, open(parcial, "wb") as f:
+                    esperado = r.headers.get("Content-Length")
+                    while True:
+                        bloco = r.read(1 << 16)
+                        if not bloco:
+                            break
+                        total += len(bloco)
+                        if total > max_bytes:
+                            raise ErroProducao(f"Arquivo maior que {max_bytes // (1 << 20)} MB: {url}")
+                        f.write(bloco)
+            except (http.client.HTTPException, ConnectionError, TimeoutError) as e:
+                raise ErroProducao(f"Download incompleto ({total} bytes recebidos; {e.__class__.__name__}): {url}") from e
             if esperado and int(esperado) != total:
                 raise ErroProducao(f"Download incompleto ({total} de {esperado} bytes): {url}")
             parcial.replace(destino)
@@ -135,6 +141,8 @@ class Candidato:
     natureza: str = "imagem de acervo aberto"
     rank: int = 0
     pontuacao: float = 0.0
+    duracao: float = 0.0       # segundos (vídeos)
+    tipo_midia: str = "imagem"  # imagem | video
 
     def para_dict(self) -> dict:
         return dict(self.__dict__)
@@ -228,11 +236,21 @@ class ProvedorCommons:
             "gsrlimit": str(limite)}))
         return self._converter(dados)
 
+    def buscar_video(self, consulta: str, limite: int = 12) -> list[Candidato]:
+        """Filmagens (WebM/Ogg/MP4) do Commons, com licença permitida; a duração vem do próprio MediaWiki."""
+        dados = self.http.json(self.base, self._params({
+            "generator": "search", "gsrsearch": f"{consulta} filetype:video", "gsrnamespace": "6", "gsrlimit": str(limite),
+            "iiurlwidth": "1280"}))
+        saida = []
+        for c in self._converter(dados, video=True):
+            saida.append(c)
+        return saida
+
     def por_titulos(self, titulos: list[str]) -> list[Candidato]:
         dados = self.http.json(self.base, self._params({"titles": "|".join(titulos)}))
         return self._converter(dados)
 
-    def _converter(self, dados: dict) -> list[Candidato]:
+    def _converter(self, dados: dict, video: bool = False) -> list[Candidato]:
         paginas = (dados.get("query") or {}).get("pages") or []
         if isinstance(paginas, dict):  # formatversion 1
             paginas = list(paginas.values())
@@ -250,9 +268,11 @@ class ProvedorCommons:
             if cat is None:
                 continue
             mime = info.get("mime", "")
+            if video != mime.startswith(("video/", "application/ogg")):
+                continue
             w, h = int(info.get("width") or 0), int(info.get("height") or 0)
             url = info.get("url", "")
-            usa_miniatura = bool(info.get("thumburl")) and (
+            usa_miniatura = (not video) and bool(info.get("thumburl")) and (
                 w > 3840 or mime not in ("image/jpeg", "image/png", "image/webp") or mime == "image/svg+xml")
             if usa_miniatura:
                 url = info["thumburl"]
@@ -272,6 +292,7 @@ class ProvedorCommons:
                 autor=meta.get("Artist", ""), credito=meta.get("Credit", ""),
                 descricao=meta.get("ImageDescription", "") or meta.get("ObjectName", ""),
                 categorias=cats, rank=int(pg.get("index", len(resultado))),
+                duracao=float(info.get("duration") or 0.0), tipo_midia="video" if video else "imagem",
             ))
         resultado.sort(key=lambda c: c.rank)
         return resultado
