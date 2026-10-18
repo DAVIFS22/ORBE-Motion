@@ -113,11 +113,15 @@ const def = {
     const poeira = criarPoeira3D({ semente: seed, n: 650, caixa: [-9, 0.3, -110, 9, 9, 16], vel: [0.12, 0.05, 0.1], cor: 0xffe2b0, tam: 1.8, op: 0.8 });
     cena.add(poeira);
 
-    const trilho = criarTrilho({
-      pos: [[-1.3, 1.65, 12], [-0.6, 1.85, -6], [0.5, 2.3, -26], [0.9, 2.8, -48]],
-      alvo: [[1.5, 2.7, -22], [0.8, 3.0, -42], [0.2, 3.2, -66], [0, 3.6, -100]],
-      fov: [50, 40], curva: (x) => 0.4 * x + 0.6 * smooth(x),
-    });
+    // vistas: 'viela' (padrão, câmera pela rua), 'telhados' (acima dos terraços, a aldeia e as colinas), 'saida' (da estrada de terra
+    // fora da aldeia, entre as oliveiras, olhando de volta para as casas)
+    const VISTAS = {
+      viela: { pos: [[-1.3, 1.65, 12], [-0.6, 1.85, -6], [0.5, 2.3, -26], [0.9, 2.8, -48]], alvo: [[1.5, 2.7, -22], [0.8, 3.0, -42], [0.2, 3.2, -66], [0, 3.6, -100]], fov: [50, 40] },
+      telhados: { pos: [[9, 8.5, 22], [6, 9.5, 6], [3, 10.5, -10]], alvo: [[-3, 3, -30], [-2, 2.5, -55], [-1, 3, -85]], fov: [44, 38] },
+      saida: { pos: [[3, 1.7, -150], [1.5, 1.8, -135], [0.5, 1.9, -122]], alvo: [[0, 3, -60], [0, 3, -50], [0, 3.2, -40]], fov: [40, 34] },
+    };
+    const VT = VISTAS[P.vista] ?? VISTAS.viela;
+    const trilho = criarTrilho({ pos: VT.pos, alvo: VT.alvo, fov: VT.fov, curva: (x) => 0.4 * x + 0.6 * smooth(x) });
     return {
       ceu, trilho, ibl: 1.0, vinheta: 0.5, poeiraTela: 16,
       eventos: [{ t: 0.05, tipo: 'whoosh' }],

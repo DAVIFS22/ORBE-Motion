@@ -34,16 +34,18 @@ class TestConteudo(unittest.TestCase):
         cenas, _ = sb.carregar()
         com = [c for c in cenas if c.mo]
         self.assertGreaterEqual(len(com), 12)
-        self.assertLessEqual(len(com), 0.12 * len(cenas))          # motion é seletivo, não é regra
+        self.assertLessEqual(len(com), 0.45 * len(cenas))          # motion é frequente, mas não é a regra
         for c in com:
             self.assertIn(c.mo, mc.CONTEUDO)
-            self.assertFalse(any(o["tipo"] in ("versiculo", "lista", "titulo") for o in c.overlays),
-                             f"{c.id}: a ficha de motion não pode colidir com um cartão de versículo/título")
+            removidos = set(mc.CONTEUDO[c.mo].get("remove_overlays", []))
+            self.assertFalse(any(o["tipo"] in ("versiculo", "lista", "titulo") and o["tipo"] not in removidos for o in c.overlays),
+                             f"{c.id}: a composição de motion não pode colidir com um cartão de versículo/título")
 
     def test_toda_ficha_diz_a_ordem_da_informacao_e_a_procedencia(self):
         for k, v in mc.CONTEUDO.items():
             p = v["params"]
-            self.assertIn(p["ficha"]["categoria"], ("historico", "mitologico", "academico", "religioso", "fonte"), k)
+            cat = p["ficha"]["categoria"] if "ficha" in p else p.get("categoria")            # tipografia e diagramas dizem a categoria direto
+            self.assertIn(cat, ("historico", "mitologico", "academico", "religioso", "fonte"), k)
             if v["comp"] == "deus":                                   # ilustração fornecida: nunca apresentada como arte antiga
                 self.assertIn("ilustra", p["rodape"].lower(), k)
                 self.assertTrue(v["exige_imagem"])
@@ -59,7 +61,7 @@ class TestConteudo(unittest.TestCase):
         pl = _plano(0, 10.0, 14.0)
         params = mb.montar_params("deus_odin_atributos", pl, al, [9.0, 10.5, 11.5, 14.2, 20.0])
         self.assertEqual([a["t"] for a in params["atributos"]], [0.5, 2.0, 3.0])           # relativos ao início do plano
-        self.assertEqual(params["batidas"], [0.5, 1.5, 4.2])                                # só as batidas dentro do plano
+        self.assertEqual(params["batidas"], [0.5, 1.5])                                     # só as batidas dentro do plano (14,2 s fica fora)
 
     def test_chave_muda_com_conteudo_semente_e_imagem(self):
         p = mb.PedidoMotion("c#1", "mapa_belem", "mapa", 6.0, 0.4, 0.4, params={"a": 1}, seed=3)
@@ -173,7 +175,7 @@ class TestAudioWeb(unittest.TestCase):
                     "eventos": [{"t": 3.0, "tipo": "impacto", "variante": 0}, {"t": 6.0, "tipo": "ping", "variante": 1}]}
             man = aw._executar_node(_MOTION, spec, d, 1)
             s = man["secoes"][0]
-            self.assertAlmostEqual(s["rmsMusicaDb"], -27 - 17 - 1.0, delta=1.0)           # corpo da seção no nível pedido
+            self.assertAlmostEqual(s["rmsMusicaDb"], -27 - 19.5 - 1.0, delta=1.0)         # corpo da seção no nível pedido (ref − 19,5 dB + nível do clima)
             self.assertLess(s["picoMusicaDb"], -3.0)
             x = np.frombuffer(subprocess.run(["ffmpeg", "-v", "error", "-i", s["musica"], "-f", "f32le", "-"], capture_output=True).stdout, np.float32)
             self.assertTrue(np.isfinite(x).all())

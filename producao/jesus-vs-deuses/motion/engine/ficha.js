@@ -128,10 +128,11 @@ export function construirFicha(pai, cfg, { x, y, largura, alinhar = 'esq' }) {
 }
 
 // Linha de procedência (fonte da imagem/dados): discreta, legível, sempre presente depois de entrar.
-export function construirRodape(pai, texto, { x, y, largura }) {
+export function construirRodape(pai, texto, { x, y, largura, sombra = false }) {
   const f = `500 ${TAM.fonte}px ${FONTE.ui}`;
   const linhas = quebrar(texto, f, largura);
-  const e = el('div', { left: x + 'px', top: y + 'px', width: largura + 'px', font: `500 ${TAM.fonte}px/${Math.round(TAM.fonte * 1.4)}px ${FONTE.ui}`, color: COR.mudo, whiteSpace: 'pre' }, pai, linhas.join('\n'));
+  const e = el('div', { left: x + 'px', top: y + 'px', width: largura + 'px', font: `500 ${TAM.fonte}px/${Math.round(TAM.fonte * 1.4)}px ${FONTE.ui}`, color: sombra ? 'rgba(239,230,210,0.82)' : COR.mudo, whiteSpace: 'pre',
+    ...(sombra ? { textShadow: '0 1px 2px rgba(0,0,0,0.9), 0 0 14px rgba(0,0,0,0.75)' } : {}) }, pai, linhas.join('\n'));
   return { aplicar(t, ini, saida = null) { const k = prog(t, ini, ini + 0.8, smooth) * (saida === null ? 1 : 1 - prog(t, saida, saida + 0.4, smooth)); e.style.opacity = String(k); }, altura: linhas.length * Math.round(TAM.fonte * 1.4) };
 }
 

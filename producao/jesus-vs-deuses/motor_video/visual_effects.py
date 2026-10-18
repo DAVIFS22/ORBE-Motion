@@ -20,7 +20,7 @@ from . import procedural_art, text_graphics as tg
 ASPECTO = 16 / 9
 LARGURA_RECORTE_REF = 2112  # largura do recorte "cover" após o pré-redimensionamento
 
-PRESETS = ["zoom_in", "zoom_out", "pan_esq", "pan_dir", "tilt_cima", "tilt_baixo", "deriva", "respiro", "foco"]
+PRESETS = ["zoom_in", "zoom_out", "pan_esq", "pan_dir", "tilt_cima", "tilt_baixo", "deriva", "respiro", "foco", "fechado"]
 
 GRADES = {  # multiplicadores RGB, saturação, contraste, brilho
     "neutro": dict(tint=(1.0, 1.0, 1.0), sat=0.96, con=1.05, bri=1.0),
@@ -127,7 +127,7 @@ def escolher_layout(src_w: int, src_h: int, foco) -> str:
 
 def calcular_camera(src_w: int, src_h: int, preset: str, intensidade: float = 1.0,
                     foco: tuple[float, float, float, float] | None = None, duracao: float = 10.0,
-                    layout: str | None = None) -> Camera:
+                    layout: str | None = None, lado: float = 0.0) -> Camera:
     """Calcula o movimento sem cortar o foco e sem sair da imagem.
 
     O recorte interpola linearmente centro e largura; se o retângulo contém o
@@ -194,6 +194,13 @@ def calcular_camera(src_w: int, src_h: int, preset: str, intensidade: float = 1.
             b = src_h / 2 + curso / 2
             (ya, yb) = (b, a) if preset == "tilt_cima" else (a, b)
             p0, p1 = ajustar(fcx if foco else src_w / 2, ya, cw), ajustar(fcx if foco else src_w / 2, yb, cw)
+    elif preset == "fechado":
+        # reenquadramento fechado (corte "punch-in"): o mesmo cenário visto mais de perto, deslocado para um lado (`lado` −1…1)
+        z0 = min(1.25, max(1.0, z_seguro)) if foco is not None else 1.25
+        z1 = z0 * (1.0 + 0.035 * intensidade)
+        cx = fcx + lado * 0.11 * src_w
+        p0 = ajustar(cx, fcy, cw_max / z0)
+        p1 = ajustar(cx + lado * 0.012 * src_w, fcy - 0.006 * src_h, cw_max / z1)
     elif preset == "deriva":
         z0, z1 = 1.03, min(1.03 + 0.05 * intensidade, max(1.03, z_seguro))
         p0 = ajustar(centro[0] - 0.01 * src_w, centro[1], cw_max / z0)
@@ -326,10 +333,11 @@ class FonteVisual:
             self.foco, self.camera = None, None
             return
         img, foco_auto = self._carregar(fundo, cache)
-        self.foco = tuple(camera["foco"]) if camera.get("foco") else (foco_auto if fundo.get("tipo") == "imagem" else None)
+        real = fundo.get("tipo") == "imagem" and not fundo.get("gerada")          # foto/obra (não um still gerado por código)
+        self.foco = tuple(camera["foco"]) if camera.get("foco") else (foco_auto if real else None)
         src_w, src_h = img.size
         self.camera = calcular_camera(src_w, src_h, camera.get("preset", "zoom_in"), camera.get("intensidade", 1.0),
-                                      self.foco, duracao, camera.get("layout"))
+                                      self.foco, duracao, camera.get("layout"), camera.get("lado", 0.0))
         # pré-escala: o recorte "cover" de referência fica com ~LARGURA_RECORTE_REF pixels
         cw_ref = min(src_w, src_h * ASPECTO)
         fator = min(1.0, LARGURA_RECORTE_REF / cw_ref)
@@ -338,7 +346,7 @@ class FonteVisual:
         else:
             fator = 1.0
         self.fator = fator
-        self.img = aplicar_grade(img, grade, auto_contraste=fundo.get("tipo") == "imagem")
+        self.img = aplicar_grade(img, grade, auto_contraste=real)
         c = self.camera
         self._cam_px = Camera(c.cx0 * fator, c.cy0 * fator, c.cw0 * fator, c.cx1 * fator, c.cy1 * fator, c.cw1 * fator,
                               c.layout, c.z0, c.z1)

@@ -14,7 +14,7 @@ from .config import ErroProducao
 from .procedural_art import MOTIVOS
 from .visual_effects import GRADES, PRESETS
 
-TRANSICOES = {"corte", "dissolve", "dip_black", "dip_gold", "dip_white"}
+TRANSICOES = {"auto", "corte", "dissolve", "dip_black", "dip_gold", "dip_white"}   # "auto": a linha do tempo decide (corte na fala, salvo exceções)
 RITMOS = {"rapido": 6.0, "normal": 11.0, "lento": 16.0}
 TIPOS_SFX = {"impacto", "whoosh", "nota", "passos", "tecido", "pergaminho", "vento_forte", "silencio", "pulso"}
 
@@ -30,7 +30,7 @@ class Cena:
     camera: tuple[str, ...] = ("zoom_in",)
     cor: str = "neutro"
     ritmo: str = "normal"
-    transicao: str = "dissolve"
+    transicao: str = "auto"
     overlays: list[dict] = field(default_factory=list)
     sfx: list[str] = field(default_factory=list)
     foco: list[float] | None = None
@@ -83,7 +83,7 @@ def T3D(cena: str, prioridade: int = 2, modo: str = "sem_imagem", plano: int = 0
 
 
 def C(id, secao, ancora, desc, q=(), motivo="ceu_estrelado", cam=("zoom_in",), cor="neutro", ritmo="normal",
-      trans="dissolve", ov=(), sfx=(), foco=None, mapa=False, lugar=None, arquivos=(), musica=None, c3d=None,
+      trans="auto", ov=(), sfx=(), foco=None, mapa=False, lugar=None, arquivos=(), musica=None, c3d=None,
       paralaxe=None) -> Cena:
     return Cena(id=id, secao=secao, ancora=ancora, descricao=desc, consultas=[_consulta(x) for x in q],
                 motivo=motivo, camera=(cam,) if isinstance(cam, str) else tuple(cam), cor=cor, ritmo=ritmo,

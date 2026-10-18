@@ -9,7 +9,7 @@ from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 
-from . import VERSAO_MOTOR
+from . import fundos3d, VERSAO_MOTOR
 from . import asset_manager as am
 from . import blender_bridge as bb
 from . import motion_bridge as mb
@@ -265,7 +265,10 @@ def produzir(cfg: Config, pasta_entrada: Path | None = None, comando: str = "") 
         if parar:
             return 0
 
-        etapas.inicio("5c/9 Motion graphics (fichas, mapas e linhas do tempo animados)")
+        etapas.inicio("5c/9 Cenários 3D estáticos e motion graphics (fichas, mapas, tipografia, cenas 3D)")
+        info_st = fundos3d.aplicar(tl, motion if cfg.motion else None, pasta_tl / "stills-3d", cfg.pasta(PASTAS["temp"]) / "motion", cfg.limite_segundos)
+        log().info("%d plano(s) com cenário 3D estático (%d still(s) distintos)%s", info_st["planos"], info_st["stills"],
+                   f" — {info_st['aviso']}" if info_st.get("aviso") else "")
         batidas = [b["t"] for b in grade["batidas"]]
         pedidos_mo = tb.coletar_pedidos_motion(tl, al, cfg.pasta(PASTAS["imagens"]), batidas, cfg.limite_segundos)
         if motion is not None and cfg.motion and pedidos_mo:
@@ -369,6 +372,7 @@ def produzir(cfg: Config, pasta_entrada: Path | None = None, comando: str = "") 
                          "planos_video": sum(1 for p in tl.planos if p.fundo.get("tipo") == "video" and p.id not in ids_3d and p.fundo.get("origem") != "motion"),
                          "planos_motion": sum(1 for p in tl.planos if p.fundo.get("origem") == "motion"),
                          "planos_gerados": sum(1 for p in tl.planos if not p.asset_id and p.id not in ids_3d and p.fundo.get("tipo") != "video"),
+                         "planos_still3d": sum(1 for p in tl.planos if p.fundo.get("gerada")),
                          "transicoes": dict(Counter(p.transicao_entrada["tipo"] for p in tl.planos))},
             "cenas_motion": [asdict(p) for p in pedidos_mo], "motion": (f"node {motion.versao_node}" if motion else None),
             "assets": assets, "pendencias": gerenciador.pendencias, "falhas_download": gerenciador.falhas, "rede": estado_rede,

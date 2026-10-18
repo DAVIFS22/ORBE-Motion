@@ -3,7 +3,7 @@
 // Reconstruções são ARTÍSTICAS (inspiradas em tipos arquitetônicos documentados), nunca evidência arqueológica.
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { rngFor } from './rng.js';
 import { criarRuido } from './tex.js';
 
@@ -12,6 +12,15 @@ const clamp = (x, a = 0, b = 1) => (x < a ? a : x > b ? b : x);
 const frac = (x) => x - Math.floor(x);
 
 // ------------------------------------------------------------------------------ geometria base ---
+
+// Esfera geodésica INDEXADA (vértices compartilhados): deslocamentos e normais ficam contínuos (sombreamento suave).
+// A IcosahedronGeometry do Three.js repete os vértices por face, o que deixa tudo facetado.
+export function esferaSuave(detalhe = 3) {
+  const g = new THREE.IcosahedronGeometry(1, detalhe);
+  g.deleteAttribute('normal'); g.deleteAttribute('uv');
+  return mergeVertices(g, 1e-5);
+}
+const finalizarSuave = (g, esc = 0.5) => { g.computeVertexNormals(); g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2)); return uvMundo(g, esc); };
 
 // UV "de caixa": projeta a textura pelo eixo dominante da normal, em metros × escala (o relevo não estica em blocos de tamanhos diferentes).
 export function uvMundo(geo, esc = 1, off = [0, 0]) {
@@ -464,20 +473,34 @@ export function banca({ w = 3.2, d = 2, h = 2.2, mats, seed = 2 }) {
 // Oliveira: tronco retorcido e copa de folhas prateadas (esferas achatadas); semente fixa.
 export function oliveira({ h = 4.2, mats, seed = 1 }) {
   const g = new THREE.Group();
-  const r = rngFor(seed, 9);
-  const tronco = revolucao(juntar([[0.34, 0], [0.26, h * 0.22], [0.2, h * 0.5], [0.12, h * 0.68]]), {
-    seg: 14, escV: 0.8, ondas: (th, y) => 1 + 0.2 * Math.sin(th * 3 + y * 1.5 + seed) + 0.08 * Math.sin(th * 7 + y * 4),
+  const r = rngFor(seed, 9), N = criarRuido(seed * 13 + 5);
+  // tronco retorcido que se divide em dois ou três galhos
+  const tronco = revolucao(juntar([[0.36, 0], [0.3, h * 0.12], [0.24, h * 0.3], [0.2, h * 0.42]]), {
+    seg: 16, escV: 0.8, ondas: (th, y) => 1 + 0.22 * Math.sin(th * 3 + y * 1.5 + seed) + 0.1 * Math.sin(th * 7 + y * 4),
   });
   g.add(malha(tronco, mats.madeira));
-  const n = 9;
+  const nG = 2 + (r() < 0.5 ? 1 : 0);
+  for (let k = 0; k < nG; k++) {
+    const a = (k / nG) * TAU + r(), L = h * (0.32 + r() * 0.12);
+    const gal = revolucao(juntar([[0.15, 0], [0.11, L * 0.6], [0.07, L]]), { seg: 10, escV: 0.8, ondas: (th, y) => 1 + 0.15 * Math.sin(th * 4 + y * 3 + k) });
+    const m = malha(gal, mats.madeira, { pos: [0, h * 0.4, 0] });
+    m.rotation.set(Math.sin(a) * 0.55, 0, Math.cos(a) * 0.55);
+    g.add(m);
+  }
+  // copa: tufos irregulares (esferas deslocadas por ruído), verde-acinzentado, formando uma umbela
+  const n = 15;
   for (let i = 0; i < n; i++) {
-    const a = r() * TAU, d = 0.9 + r() * 1.4, y = h * (0.6 + r() * 0.3), s = 0.85 + r() * 0.7;
-    const copa = new THREE.IcosahedronGeometry(1, 2);
+    const a = r() * TAU, d = h * (0.12 + r() * 0.36), y = h * (0.62 + r() * 0.3) - d * 0.25, s = h * (0.13 + r() * 0.09);
+    const copa = esferaSuave(3);
     const q = copa.attributes.position;
-    for (let k = 0; k < q.count; k++) { const f = 1 + 0.18 * Math.sin(q.getX(k) * 5 + i) * Math.cos(q.getZ(k) * 4 + i * 2); q.setXYZ(k, q.getX(k) * f, q.getY(k) * f, q.getZ(k) * f); }
-    copa.computeVertexNormals();
+    for (let k = 0; k < q.count; k++) {
+      const x = q.getX(k), yy = q.getY(k), z = q.getZ(k);
+      const f = 0.72 + 0.5 * N.fbm(x * 1.8 + i * 3.1, z * 1.8 + yy * 1.3, 4) + 0.12 * N.cresta(x * 4 + i, yy * 4, 2);
+      q.setXYZ(k, x * f, yy * f * 0.62, z * f);
+    }
+    finalizarSuave(copa);
     const m = malha(copa, mats.folha);
-    m.scale.set(s * 1.2, s * 0.62, s * 1.2); m.position.set(Math.cos(a) * d, y, Math.sin(a) * d);
+    m.scale.setScalar(s); m.position.set(Math.cos(a) * d, y, Math.sin(a) * d);
     g.add(m);
   }
   return g;
@@ -514,6 +537,84 @@ export function floresta({ n = 800, area, altura, aceita, mats, seed = 3, escala
 // ------------------------------------------------------------------------------------ terreno ---
 
 // Malha de terreno a partir de uma função de altura; cor opcional por vértice (rampa/declive/altitude).
+export function rochedo(r, seed) {                          // bloco de rocha: esfera achatada com deslocamento por ruído (faces arredondadas, arestas quebradas)
+  const g = esferaSuave(3); const p = g.attributes.position; const R = rngFor(seed, 3); const N = criarRuido(seed * 31 + 7);
+  const k = [0.8 + R() * 0.45, 0.5 + R() * 0.35, 0.8 + R() * 0.45];
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const f = 0.78 + 0.34 * N.fbm(x * 1.6 + 3, z * 1.6 + y * 0.9, 4) + 0.1 * N.cresta(x * 3 + y, z * 3, 3);
+    p.setXYZ(i, x * k[0] * f * r, Math.max(-0.35, y) * k[1] * f * r, z * k[2] * f * r);
+  }
+  return finalizarSuave(g, 0.5);
+}
+
+// Barco de pesca do lago da Galileia (escala do barco do século I achado em 1986: ~8,2 × 2,3 m). Casco paramétrico de
+// tábuas, borda, bancos, mastro com a vela recolhida e remos. Reconstrução artística.
+export function barcoPesca({ L = 8.2, B = 2.3, D = 1.15, mats, mastro = true, remos = true }) {
+  const g = new THREE.Group();
+  const nu = 48, nv = 24;
+  const meia = (u) => (B / 2) * Math.pow(Math.max(0, Math.sin(Math.PI * u)), 0.55);
+  const borda = (u) => 0.32 * Math.pow(2 * u - 1, 2);                       // tosado: proa e popa mais altas
+  const fundo = (u) => D * (0.72 + 0.28 * Math.sin(Math.PI * u));
+  const pos = [], uvs = [], idx = [];
+  for (let i = 0; i <= nu; i++) for (let j = 0; j <= nv; j++) {
+    const u = i / nu, a = (j / nv) * 2 - 1;
+    const x = (u - 0.5) * L, z = a * meia(u) * (1 - 0.12 * (1 - Math.abs(a))), y = borda(u) - fundo(u) * (1 - Math.pow(Math.abs(a), 2.4));
+    pos.push(x, y, z); uvs.push(x * 0.55, (a + 1) * 1.6);
+  }
+  for (let i = 0; i < nu; i++) for (let j = 0; j < nv; j++) { const a = i * (nv + 1) + j, b = a + nv + 1; idx.push(a, b, a + 1, b, b + 1, a + 1); }
+  const casco = new THREE.BufferGeometry(); casco.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); casco.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  casco.setIndex(idx); casco.computeVertexNormals();
+  const mCasco = mats.casco.clone(); mCasco.side = THREE.DoubleSide;
+  g.add(malha(casco, mCasco));
+  for (const lado of [-1, 1]) {                                              // borda (verdugo) em tubo
+    const pts = []; for (let i = 0; i <= 30; i++) { const u = 0.02 + 0.96 * i / 30; pts.push(new THREE.Vector3((u - 0.5) * L, borda(u) + 0.02, lado * meia(u) * 0.99)); }
+    g.add(malha(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 40, 0.055, 6, false), mats.madeira));
+  }
+  for (const u of [0.3, 0.5, 0.7]) g.add(malha(caixa(0.28, 0.06, meia(u) * 1.9, { raio: 0.01, esc: 0.5 }), mats.madeira, { pos: [(u - 0.5) * L, borda(u) - 0.3, 0] }));
+  if (mastro) {
+    const xm = 0.12 * L;
+    g.add(malha(new THREE.CylinderGeometry(0.06, 0.085, 5.6, 10), mats.madeira, { pos: [xm, 2.2, 0] }));
+    const verga = malha(new THREE.CylinderGeometry(0.045, 0.045, 5.0, 8), mats.madeira, { pos: [xm, 4.4, 0] }); verga.rotation.z = Math.PI / 2 - 0.12; g.add(verga);
+    const vela = malha(new THREE.CapsuleGeometry(0.16, 4.2, 4, 10), mats.vela, { pos: [xm, 4.22, 0.05] }); vela.rotation.z = Math.PI / 2 - 0.12; g.add(vela);
+  }
+  if (remos) for (const lado of [-1, 1]) { const r = malha(caixa(4.2, 0.06, 0.1, { raio: 0.01 }), mats.madeira, { pos: [-0.6, borda(0.42) + 0.05, lado * 0.85] }); r.rotation.y = lado * 0.08; g.add(r); }
+  return g;
+}
+
+// Bosque instanciado (muitas árvores baratas): tronco + copa de tufos fundidos numa geometria só, repetida por InstancedMesh.
+// pontos: [[x, y, z, escala, rotY], ...]
+export function bosque({ pontos, mats, seed = 1 }) {
+  const N = criarRuido(seed * 7 + 3), r = rngFor(seed, 17);
+  const partes = [];
+  for (let i = 0; i < 6; i++) {
+    const a = r() * TAU, d = 0.3 + r() * 1.0, s = 0.75 + r() * 0.5;
+    const c = esferaSuave(2); const q = c.attributes.position;
+    for (let k = 0; k < q.count; k++) { const x = q.getX(k), y = q.getY(k), z = q.getZ(k), f = 0.75 + 0.45 * N.fbm(x * 1.7 + i, z * 1.7 + y, 3); q.setXYZ(k, x * f * s + Math.cos(a) * d, y * f * s * 0.6 + 2.9 + r() * 0.6, z * f * s + Math.sin(a) * d); }
+    partes.push(c);
+  }
+  partes.forEach((g) => finalizarSuave(g));
+  const copa = mergeGeometries(partes);
+  const tronco = new THREE.CylinderGeometry(0.13, 0.22, 3.0, 7); tronco.translate(0, 1.5, 0);
+  const iC = new THREE.InstancedMesh(copa, mats.folha, pontos.length), iT = new THREE.InstancedMesh(tronco, mats.madeira, pontos.length);
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
+  pontos.forEach(([x, y, z, esc, rot], i) => { e.set(0, rot, 0); q.setFromEuler(e); m4.compose(new THREE.Vector3(x, y, z), q, new THREE.Vector3(esc, esc, esc)); iC.setMatrixAt(i, m4); iT.setMatrixAt(i, m4); });
+  for (const im of [iC, iT]) { im.castShadow = true; im.receiveShadow = true; }
+  const g = new THREE.Group(); g.add(iC, iT);
+  return g;
+}
+
+// Rede de pesca: textura de malha com alfa (losangos e nós), para panos estendidos.
+export function texturaRede(tam = 512, malhas = 22) {
+  const c = document.createElement('canvas'); c.width = c.height = tam; const g = c.getContext('2d');
+  g.clearRect(0, 0, tam, tam); g.strokeStyle = 'rgba(70,58,44,1)'; g.lineWidth = 2.2;
+  const p = tam / malhas;
+  for (let k = -malhas; k <= 2 * malhas; k++) { g.beginPath(); g.moveTo(k * p, 0); g.lineTo(k * p + tam, tam); g.stroke(); g.beginPath(); g.moveTo(k * p, tam); g.lineTo(k * p + tam, 0); g.stroke(); }
+  g.fillStyle = 'rgba(60,48,36,1)'; for (let i = 0; i <= malhas; i++) for (let j = 0; j <= malhas; j++) { g.beginPath(); g.arc(i * p + p / 2, j * p, 2.4, 0, Math.PI * 2); g.fill(); }
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+  return t;
+}
+
 export function terreno({ larg, prof, nx = 160, nz = 160, altura, cor = null, esc = 0.1, centro = [0, 0], uvf = null }) {
   const g = new THREE.PlaneGeometry(larg, prof, nx, nz);
   g.rotateX(-Math.PI / 2);

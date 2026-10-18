@@ -132,12 +132,60 @@ def tempo_da_palavra(al: sa.Alinhamento, ini: float, fim: float, palavra: str) -
     return None
 
 
+def linhas_da_frase(texto: str, plano, al: sa.Alinhamento | None) -> tuple[list[list[dict]], int]:
+    """Quebra a frase ("|" = nova linha, *palavra* = ênfase) e dá a cada palavra o instante em que é dita no plano
+    (busca em ordem no alinhamento). Palavra não encontrada fica 0,3 s depois da anterior. Devolve (linhas, n_sincronizadas)."""
+    toks = [(li, tok) for li, trecho in enumerate(texto.split("|")) for tok in trecho.split()]
+    alvos = [sa.normalizar(tok.strip("*")) for _, tok in toks]
+    # ocorrências de cada palavra dentro do plano; escolhe a sequência crescente mais compacta (programação dinâmica).
+    # Pular uma palavra curta ("o", "a", "e") custa pouco: ela não é casada com uma ocorrência distante; palavras de conteúdo
+    # quase nunca são puladas, mesmo quando a frase junta trechos não contíguos da fala.
+    occ = [[ti for w, ti in zip(al.normalizadas, al.t_ini) if w == a and plano.inicio - 0.05 <= ti <= plano.fim] if al is not None and a else []
+           for a in alvos]
+    estados = {None: (0.0, [])}                      # último instante escolhido -> (custo, escolhas)
+    for a, o in zip(alvos, occ):
+        PULO = 1.2 if len(a) <= 2 else 8.0
+        novos: dict = {}
+        for ult, (custo, esc) in estados.items():
+            cand = [(custo + PULO, ult, esc + [None])]
+            cand += [(custo + (ti - ult if ult is not None else 0.0), ti, esc + [ti]) for ti in o if ult is None or ti > ult]
+            for c, u, e in cand:
+                if u not in novos or c < novos[u][0]:
+                    novos[u] = (c, e)
+        estados = novos
+    escolha = min(estados.values(), key=lambda v: v[0])[1]
+    tempos = [None if ti is None else ti - plano.inicio for ti in escolha]
+    for i in range(len(tempos)):                      # palavra sem ocorrência: logo antes da seguinte encontrada, ou depois da anterior
+        if tempos[i] is None:
+            prox = next((tempos[j] for j in range(i + 1, len(tempos)) if tempos[j] is not None), None)
+            ant = tempos[i - 1] if i > 0 else None
+            tempos[i] = max(0.0, prox - 0.25) if prox is not None and (ant is None or prox - 0.25 > ant) else (ant + 0.3 if ant is not None else 0.35)
+    linhas: list[list[dict]] = []
+    for (li, tok), t in zip(toks, tempos):
+        while len(linhas) <= li:
+            linhas.append([])
+        enfase = len(tok) > 2 and tok.startswith("*") and tok.endswith("*")
+        linhas[li].append({"txt": tok.strip("*"), "t": round(t, 3), **({"enfase": True} if enfase else {})})
+    return [l for l in linhas if l], sum(1 for ti in escolha if ti is not None)
+
+
 def montar_params(conteudo_id: str, plano, al: sa.Alinhamento | None, batidas: list[float]) -> dict:
     """Parâmetros finais da composição: conteúdo + sincronia com a fala + batidas relativas ao início do plano."""
     params = copy.deepcopy(CONTEUDO[conteudo_id]["params"])
     for i, a in enumerate(params.get("atributos") or []):
         t = tempo_da_palavra(al, plano.inicio, plano.fim, a["palavra"]) if al is not None else None
         a["t"] = round((t - plano.inicio) if t is not None else 1.4 + 0.9 * i, 3)
+    if params.get("palavra_ativa"):
+        t = tempo_da_palavra(al, plano.inicio, plano.fim, params.pop("palavra_ativa")) if al is not None else None
+        params["t_ativo"] = round((t - plano.inicio) if t is not None else min(1.2, plano.duracao * 0.4), 3)
+    if params.get("texto"):
+        linhas, achadas = linhas_da_frase(params.pop("texto"), plano, al)
+        params["linhas"] = linhas
+        params["sincronia"] = {"palavras": sum(len(x) for x in linhas), "no_alinhamento": achadas}
+        # corte interno para um enquadramento mais fechado quando a segunda linha começa (se houver tempo para os dois)
+        if len(linhas) >= 2 and plano.duracao >= 5.0 and 1.6 <= linhas[1][0]["t"] <= plano.duracao - 1.6:
+            dx = 110 if params.get("lado") == "dir" else -110
+            params["camera"] = {"corte": {"t": linhas[1][0]["t"], "s": 1.28, "x": dx, "y": 24}}
     params["batidas"] = [round(b - plano.inicio, 4) for b in batidas if plano.inicio - 0.01 <= b <= plano.fim + 0.01]
     return params
 

@@ -136,9 +136,10 @@ def linha_mestre(tl: Timeline, man: dict, secoes: list[dict], eventos: list[dict
         p = _plano_em(tl, ev["t"])
         perf = perfis.get(ev["tipo"], {})
         efeitos.append({"t": ev["t"], "dur": ev.get("dur") or DUR_EFEITO.get(ev["tipo"], 1.0), "tipo": ev["tipo"], "variante": ev.get("variante", 0),
-                        "parametros_sintese": perf.get("sintese"), "volume_pico_dbfs": round(ref + alvos.get(ev["tipo"], -12), 1), "envelope": perf.get("envelope"),
-                        "pan": perf.get("pan"), "papel": perf.get("papel"), "cena": ev.get("cena") or p.cena_id, "plano": p.id,
-                        "relacao_narracao": f"sob a fala: “{_trecho(p.narracao)}”", "justificativa": _justificativa(ev, p)})
+                        "parametros_sintese": perf.get("sintese"), "volume_pico_dbfs": round(ref + alvos.get(ev["tipo"], -12) + ev.get("ganhoDb", 0.0), 1),
+                        "envelope": perf.get("envelope"), "pan": perf.get("pan"), "papel": perf.get("papel"), "cena": ev.get("cena") or p.cena_id, "plano": p.id,
+                        "relacao_narracao": f"sob a fala: “{_trecho(p.narracao)}”", "justificativa": _justificativa(ev, p),
+                        **({"ajuste_a_fala": ev["ajuste"]} if ev.get("ajuste") else {})})
     musica = []
     for s_man in man.get("secoes", []):
         c = CLIMAS[s_man["clima"]]
@@ -184,6 +185,43 @@ def _rms_fala_por_trecho(narr: dict, trechos: list[tuple[float, float]], margem_
     return out
 
 
+LEVES = {"whoosh", "faixa", "rota", "ping", "tecido", "pergaminho"}     # texturas de passagem: cedem lugar à fala
+
+
+def _acomodar_a_fala(eventos: list[dict], narr: dict, folga_s: float = 0.35, atenuacao_db: float = -6.0) -> None:
+    """Efeitos leves que cairiam sobre uma palavra vão para a pausa mais próxima (até ±`folga_s`, ainda junto do corte);
+    sem pausa por perto, ficam onde estão com `atenuacao_db`. Eventos ligados a uma animação só são atenuados."""
+    ativo = narr.get("atividade")
+    if ativo is None:
+        return
+    hz = narr.get("resolucao_hz", 20.0)
+
+    def fala(t: float, dur: float) -> float:                     # fração com fala no trecho de maior energia do efeito
+        a, b = max(0, int((t + 0.15 * dur) * hz)), max(1, int((t + 0.8 * dur) * hz))
+        sel = ativo[a:b]
+        return float(np.mean(sel)) if len(sel) else 0.0
+
+    for ev in eventos:
+        if ev["tipo"] not in LEVES:
+            continue
+        dur = ev.get("dur") or DUR_EFEITO.get(ev["tipo"], 1.0)
+        f0 = fala(ev["t"], dur)
+        if f0 <= 0.25:
+            continue
+        melhor = (f0, 0.0)
+        if ev.get("origem") != "motion":
+            for k in range(1, int(folga_s / 0.05) + 1):
+                for d in (-0.05 * k, 0.05 * k):
+                    if ev["t"] + d >= 0 and fala(ev["t"] + d, dur) < melhor[0] - 1e-9:
+                        melhor = (fala(ev["t"] + d, dur), d)
+        if melhor[0] <= 0.1:
+            ev["t"] = round(ev["t"] + melhor[1], 4)
+            ev["ajuste"] = f"deslocado {melhor[1] * 1000:+.0f} ms para a pausa da fala"
+        else:
+            ev["ganhoDb"] = atenuacao_db
+            ev["ajuste"] = f"sobre a fala ({f0:.0%} do trecho principal): atenuado {atenuacao_db:+.0f} dB"
+
+
 def construir_stems_web(tl: Timeline, narr: dict, pasta_audio: Path, motion: Motion, limite: float | None = None, grade: dict | None = None) -> dict:
     """Mesmo contrato de `audio_mixer.construir_stems`: devolve {musica, efeitos, fontes} (+ manifesto e linha do tempo mestre)."""
     pasta_audio.mkdir(parents=True, exist_ok=True)
@@ -213,8 +251,9 @@ def construir_stems_web(tl: Timeline, narr: dict, pasta_audio: Path, motion: Mot
         contadores[tipo] = k + 1
         eventos.append({"t": round(ev["t"], 4), "tipo": tipo, "variante": k % 4, "dur": ev.get("dur", 0.0),
                         **{c: ev[c] for c in ("cena", "auto", "origem", "comp") if c in ev}})
+    _acomodar_a_fala(eventos, narr)
     spec = {"saida": pasta_audio / "webaudio", "ref": ref, "xf": XF, "cauda": CAUDA, "janela": 60, "total": total, "secoes": secoes,
-            "eventos": [{k: e[k] for k in ("t", "tipo", "variante", "dur")} for e in eventos]}
+            "eventos": [{k: e[k] for k in ("t", "tipo", "variante", "dur", "ganhoDb") if k in e} for e in eventos]}
     man = _executar_node(motion, spec, pasta_audio, len(secoes))
 
     N = int(math.ceil(total * SR))

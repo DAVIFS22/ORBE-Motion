@@ -77,7 +77,7 @@ const def = {
     // luzes
     const sol = criarSol({ cor: 0xffd29a, intensidade: 5.6, dir: paraSol, alvo: [0, 4, 0], dist: 160, caixa: 62, mapa: 4096, bias: -0.0003, normalBias: 0.07, near: 30, far: 380 });
     cena.add(sol, sol.target);
-    cena.add(new THREE.HemisphereLight(0x7ea0d8, 0x6a5538, 0.55));
+    cena.add(new THREE.HemisphereLight(0xa4aabc, 0x7a6040, 0.55));          // céu menos saturado: a sombra não fica azul demais
     const poeira = criarPoeira3D({ semente: seed, n: 500, caixa: [-45, 0, -45, 45, 22, 80], vel: [0.2, 0.04, -0.08], cor: 0xffe2b0, tam: 1.8, op: 0.6 });
     cena.add(poeira);
 

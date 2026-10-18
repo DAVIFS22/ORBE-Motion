@@ -1,7 +1,12 @@
 // Texturas procedurais PBR (cor, relevo → normal map, rugosidade) geradas por código, com ruído de semente fixa.
 // Todas são repetíveis (tileable) e determinísticas: o mesmo (receita, semente, tamanho) produz sempre os mesmos pixels.
 import * as THREE from 'three';
-import { hash32 } from './rng.js';
+import { hash32 as fnv } from './rng.js';
+
+// FNV-1a sozinho correlaciona inteiros vizinhos (o ruído saía esticado em listras); a mistura final do MurmurHash3 (fmix32)
+// espalha cada bit da entrada por todos os bits da saída.
+const fmix32 = (h) => { h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b); h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16; return h >>> 0; };
+const hash32 = (...v) => fmix32(fnv(...v));
 
 // ----------------------------------------------------------------------------------- ruído ---
 const quintic = (t) => t * t * t * (t * (t * 6 - 15) + 10);
@@ -107,15 +112,19 @@ export function areia({ tam = 1024, semente = 3, base = [214, 176, 112], ondas =
 
 // Reboco antigo (Judeia): paredes caiadas com manchas, fissuras e remendos de pedra à mostra.
 export function reboco({ tam = 1024, semente = 4, base = [214, 200, 172], remendos = 0.5 } = {}) {
+  // Reboco de cal sobre pedra: variação suave, manchas de umidade, fissuras finas só em algumas áreas e pedras do muro
+  // aparecendo onde o reboco caiu (transições suaves: nada de contornos duros).
   const R = criarRuido(semente), R2 = criarRuido(semente + 11);
+  const ss = (a, b, x) => { const t = clamp((x - a) / (b - a)); return t * t * (3 - 2 * t); };
   return gerar(tam, (u, v) => {
-    const m = R.fbm(u * 6, v * 6, 5, 6), manc = R2.fbm(u * 2.5, v * 2.5, 4, 3), fis = Math.pow(1 - Math.abs(R.noise(u * 9, v * 9, 9) * 2 - 1), 12);
-    const pedra = R2.noise(u * 7, v * 7, 7) > 1 - remendos * 0.22 ? 1 : 0;
-    let k = 0.88 + 0.2 * m - 0.28 * Math.pow(manc, 3) - 0.35 * fis;
-    let c = base.map((x) => x * k);
-    if (pedra) { const b = 0.62 + 0.3 * R.noise(u * 60, v * 60); c = [168 * b, 148 * b, 118 * b]; }
-    return { c: c.map((x) => clamp(x, 0, 255)), h: pedra ? 0.35 : 0.55 + 0.2 * m - 0.3 * fis, r: 0.93 };
-  }, { forcaNormal: 3.0 });
+    const m = R.fbm(u * 6, v * 6, 5, 6), manc = R2.fbm(u * 2.5, v * 2.5, 4, 3), fino = R.noise(u * 140, v * 140, 140);
+    const fis = Math.pow(1 - Math.abs(R.noise(u * 16, v * 16, 16) * 2 - 1), 40) * ss(0.55, 0.7, R2.noise(u * 4, v * 4, 4));
+    const lim = 1 - remendos * 0.2, pedra = ss(lim, lim + 0.05, R2.noise(u * 7, v * 7, 7));
+    const k = 0.9 + 0.13 * m + 0.05 * (fino - 0.5) - 0.22 * Math.pow(manc, 3) - 0.22 * fis;
+    const b = 0.62 + 0.3 * R.noise(u * 60, v * 60);
+    const c = mixc(base.map((x) => x * k), [168 * b, 148 * b, 118 * b], pedra);
+    return { c: c.map((x) => clamp(x, 0, 255)), h: 0.55 + 0.15 * m - 0.18 * fis - 0.15 * pedra + 0.03 * fino, r: 0.93 };
+  }, { forcaNormal: 2.0 });
 }
 
 export function lajes({ tam = 1024, semente = 5, n = 5, base = [150, 138, 118] } = {}) {
@@ -129,10 +138,10 @@ export function lajes({ tam = 1024, semente = 5, n = 5, base = [150, 138, 118] }
   }, { forcaNormal: 4.0 });
 }
 
-export function terra({ tam = 1024, semente = 6, base = [128, 104, 74] } = {}) {
+export function terra({ tam = 1024, semente = 6, base = [128, 104, 74], seixos = 1 } = {}) {
   const R = criarRuido(semente);
   return gerar(tam, (u, v) => {
-    const g = R.fbm(u * 10, v * 10, 6, 10), s = R.noise(u * 200, v * 200), pedr = R.noise(u * 30, v * 30, 30) > 0.86 ? 1 : 0;
+    const g = R.fbm(u * 10, v * 10, 6, 10), s = R.noise(u * 200, v * 200), pedr = R.noise(u * 30, v * 30, 30) > 1 - 0.14 * seixos ? 1 : 0;
     const k = 0.7 + 0.4 * g + 0.1 * s;
     const c = pedr ? [150 * (0.7 + 0.3 * s), 138 * (0.7 + 0.3 * s), 120 * (0.7 + 0.3 * s)] : base.map((x) => x * k);
     return { c: c.map((x) => clamp(x, 0, 255)), h: 0.4 + 0.4 * g + (pedr ? 0.2 : 0), r: 0.98 };
@@ -146,6 +155,20 @@ export function rocha({ tam = 1024, semente = 7, base = [118, 112, 104] } = {}) 
     const k = 0.55 + 0.6 * c * c + 0.2 * g;
     return { c: mixc(base, [150, 140, 126], l * 0.5).map((x) => clamp(x * k, 0, 255)), h: c, r: 0.92 };
   }, { forcaNormal: 5.0 });
+}
+
+// Calcário (rocha da Judeia): estratos horizontais suaves, grão fino, poros e escorrimentos verticais de intempérie.
+export function calcario({ tam = 1024, semente = 12, base = [214, 200, 172], estratos = 9, escorrido = 0.5 } = {}) {
+  const R = criarRuido(semente);
+  return gerar(tam, (u, v) => {
+    const g = R.fbm(u * 6, v * 6, 5, 6), fino = R.noise(u * 160, v * 160, 160), meso = R.fbm(u * 24, v * 24, 3, 24);
+    const est = 0.5 + 0.5 * Math.sin((v * estratos + 0.35 * R.fbm(u * 3, v * 3, 3, 3)) * Math.PI * 2);
+    const escorr = R.fbm(u * 28, v * 1.0, 4, 28) * escorrido;
+    const pn = R.noise(u * 260, v * 260, 260), poro = pn > 0.9 ? (pn - 0.9) * 10 : 0;          // poros pequenos e raros, de borda suave
+    const k = 0.84 + 0.12 * g + 0.06 * est + 0.05 * (fino - 0.5) + 0.05 * (meso - 0.5) - 0.16 * Math.max(0, escorr - 0.28) - 0.1 * poro;
+    const c = mixc(base, [168, 152, 128], Math.max(0, escorr - 0.3) * 0.8).map((x) => clamp(x * k, 0, 255));
+    return { c, h: 0.45 + 0.25 * g + 0.12 * est + 0.06 * meso - 0.06 * poro, r: 0.9 };
+  }, { forcaNormal: 2.2 });
 }
 
 export function madeira({ tam = 512, semente = 8, base = [112, 78, 48] } = {}) {

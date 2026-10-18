@@ -174,28 +174,36 @@ def analisar_narracao(wav: Path, duracao_esperada: float | None = None) -> dict:
     return a
 
 
-def _banda_voz(blk: np.ndarray, janela: np.ndarray, freq: np.ndarray) -> float:
+def _quadros_banda_voz(blk: np.ndarray, q: int) -> np.ndarray:
+    """Energia média por quadro de `q` amostras do sinal mono filtrado na banda da fala (filtro por FFT do bloco inteiro)."""
     mid = (blk[:, 0].astype(np.float64) + blk[:, 1].astype(np.float64)) / 2
-    P = np.abs(np.fft.rfft(mid * janela)) ** 2
-    m = (freq >= BANDA_VOZ[0]) & (freq <= BANDA_VOZ[1])
-    return float(P[m].sum()) + 1e-18
+    X = np.fft.rfft(mid)
+    f = np.fft.rfftfreq(len(mid), 1 / SR)
+    X[(f < BANDA_VOZ[0]) | (f > BANDA_VOZ[1])] = 0
+    y = np.fft.irfft(X, len(mid))
+    n = len(y) // q
+    return (y[: n * q].reshape(n, q) ** 2).mean(axis=1) + 1e-18
 
 
 def inteligibilidade(narracao: Path, fundo: Path, duracao: float, limiar_voz_db: float = -50.0, piso_db: float = 14.0) -> dict:
     """Razão voz/fundo (dB) na banda da fala, em janelas de 1 s com FALA de fato (nível da voz até 10 dB abaixo da mediana das
-    janelas com voz; caudas e respirações não contam). `fundo` = música + efeitos já com ducking (sem a voz)."""
-    freq = np.fft.rfftfreq(SR, 1 / SR)
-    janela = np.hanning(SR)
+    janelas com voz; caudas e respirações não contam). Dentro de cada janela só entram os quadros de 50 ms em que a voz soa
+    (até 20 dB abaixo do quadro mais forte): o que toca numa pausa não mascara palavra nenhuma.
+    `fundo` = música + efeitos já com ducking (sem a voz)."""
+    q = SR // 20
     pares, tempos = [], []
     t = 0.0
     for bn, bf in zip(_bloco_f32(narracao, 10.0), _bloco_f32(fundo, 10.0)):
         n = min(len(bn), len(bf))
-        for i in range(0, n - SR + 1, SR):
-            vn = 10 * math.log10(_banda_voz(bn[i:i + SR], janela, freq) / (SR * SR))
-            if vn < limiar_voz_db:
+        en, ef = _quadros_banda_voz(bn[:n], q), _quadros_banda_voz(bf[:n], q)
+        for i in range(0, len(en) - 19, 20):
+            wn, wf = en[i:i + 20], ef[i:i + 20]
+            dbn = 10 * np.log10(wn)
+            sel = dbn >= max(limiar_voz_db, float(dbn.max()) - 20.0)
+            if sel.sum() < 4:                                     # menos de 200 ms de fala na janela
                 continue
-            vf = 10 * math.log10(_banda_voz(bf[i:i + SR], janela, freq) / (SR * SR))
-            pares.append((vn, vf)); tempos.append(t + i / SR)
+            pares.append((10 * math.log10(float(wn[sel].mean())), 10 * math.log10(float(wf[sel].mean()))))
+            tempos.append(t + i * q / SR)
         t += n / SR
     if not pares:
         return {"janelas_com_fala": 0, "aprovado": False, "observacao": "nenhuma janela com fala encontrada"}
@@ -207,7 +215,8 @@ def inteligibilidade(narracao: Path, fundo: Path, duracao: float, limiar_voz_db:
     return {"janelas_com_fala": int(len(r)), "razao_db": {"p5": round(float(np.percentile(r, 5)), 1), "p25": round(float(np.percentile(r, 25)), 1),
             "mediana": round(float(np.median(r)), 1), "p95": round(float(np.percentile(r, 95)), 1)},
             "janelas_abaixo_do_piso": int((r < piso_db).sum()), "piso_db": piso_db, "piores": ruins,
-            "aprovado": bool(np.percentile(r, 5) >= piso_db), "criterio": f"p5 da razão voz/fundo (300–3400 Hz) ≥ {piso_db} dB nas janelas com fala"}
+            "aprovado": bool(np.percentile(r, 5) >= piso_db),
+            "criterio": f"p5 da razão voz/fundo (300–3400 Hz, só nos quadros com fala) ≥ {piso_db} dB nas janelas com fala"}
 
 
 def profundidade_ducking(fundo: Path, fundo_sem_voz_ref: Path | None = None) -> dict:

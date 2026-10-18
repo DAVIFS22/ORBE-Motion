@@ -92,7 +92,7 @@ window.renderEfeitos = async function (spec) {
   const busJanela = criarBarramento(ctx, saida, { decaimento: 3.2, wet: 0.5, semente: 9, brilho: 0.4 });
   for (const e of eventos) {
     const v = e.variante ?? 0, chave = e.tipo + ':' + (cal[e.tipo + ':' + v] !== undefined ? v : v % 2);
-    const alvo = dbLin(ref + (ALVOS_PICO[e.tipo] ?? -12)), fator = alvo / (cal[chave] ?? 1);
+    const alvo = dbLin(ref + (ALVOS_PICO[e.tipo] ?? -12) + (e.ganhoDb ?? 0)), fator = alvo / (cal[chave] ?? 1);
     const sg = ctx.createGain(), se = ctx.createGain(); sg.gain.value = fator; se.gain.value = fator;
     sg.connect(busJanela.seco); se.connect(busJanela.envio);
     tocarEvento(ctx, { ctx, seco: sg, envio: se }, e.tipo, e.t - t0 + folga, v, e.dur ?? 0);

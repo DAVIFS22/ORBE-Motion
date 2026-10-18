@@ -60,11 +60,21 @@ const CASOS = {
     rotas: [{ pontos: [[31.25, 29.85], [23.7, 38], [17.6, 59.9]], f0: 0.4, f1: 0.9 }], ficha: { eyebrow: 'Mapa', nome: 'Teste', periodo: 'Teste', categoria: 'historico' } } },
   periodo: { dur: 6, params: { janela: [{ f: 0, a: -3500, b: 1500 }, { f: 1, a: -100, b: 100 }], periodos: [{ nome: 'Egito antigo', ini: -3100, fim: -30, lane: 0, f: 0.1 }],
     eventos: [{ nome: 'Evento', sub: 'x', ano: 30, aprox: true, f: 0.5, nivel: 0, foco: true }], ficha: { eyebrow: 'Linha do tempo', nome: 'Teste', periodo: 'Teste', categoria: 'historico' } } },
+  frase: { dur: 5.5, params: { imagem: '/ativo/placa', lado: 'esq', eyebrow: 'João 1:1', aspas: true, nota: 'Citação de teste',
+    linhas: [[{ txt: 'No', t: 0.5 }, { txt: 'princípio', t: 0.8 }], [{ txt: 'era', t: 1.6 }, { txt: 'o', t: 1.8 }, { txt: 'Verbo', t: 2.0, enfase: true }]],
+    camera: { corte: { t: 1.6, s: 1.28, x: -110, y: 24 } } } },
+  pontos: { dur: 5.5, params: { imagem: '/ativo/placa', ativo: 3, t_ativo: 1.6, itens: [{ rotulo: 'Um', ref: 'A 1' }, { rotulo: 'Dois', ref: 'B 2' }, { rotulo: 'Três', ref: 'C 3' }, { rotulo: 'Quatro', ref: 'D 4' }, { rotulo: 'Cinco', ref: 'E 5' }] } },
 };
 
 // cenas Three.js/WebGL (SwiftShader): menos instantes por caso, pois cada carga leva alguns segundos
 const FICHA3D = { eyebrow: 'Teste · cena 3D', nome: 'Teste', periodo: 'Teste', categoria: 'historico', descricao: '' };
 for (const [comp, dur] of [['cena3d_abertura', 4.4], ['cena3d_egito', 4.2], ['cena3d_grecia', 5.8], ['cena3d_fiorde', 9.9], ['cena3d_judeia', 3.2]]) CASOS[comp] = { dur, params: { ficha: FICHA3D, rodape: 'Reconstrução artística de teste.', ...(comp === 'cena3d_abertura' ? { hud: { desligado: true } } : {}) }, tres: true };
+// cenas novas, uma vista cada (a do Gólgota com anotação híbrida e só o rodapé)
+CASOS.cena3d_golgota = { dur: 6, tres: true, params: { vista: 'distante', ficha: FICHA3D, rodape: 'Reconstrução artística de teste.', hud: { desligado: true, rodape: true },
+  anotacoes: [{ pos: [30, 14.5, -336], texto: 'Muralha', sub: 'teste', t0: 1.0, t1: 5.5 }] } };
+CASOS.cena3d_tumulo = { dur: 5, tres: true, params: { vista: 'interior', ficha: FICHA3D, rodape: 'Reconstrução artística de teste.' } };
+CASOS.cena3d_galileia = { dur: 6, tres: true, params: { vista: 'lago', ficha: FICHA3D, rodape: 'Paisagem artística de teste.' } };
+CASOS.cena3d_escritos = { dur: 5, tres: true, params: { vista: 'mesa', ficha: FICHA3D, rodape: 'Composição artística de teste.', hud: { desligado: true } } };
 
 for (const [comp, { dur, params, tres }] of Object.entries(CASOS)) {
   test(`determinismo de "${comp}": mesma imagem em ordem direta, reversa e a frio`, () => {

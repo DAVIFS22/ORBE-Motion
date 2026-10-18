@@ -14,11 +14,17 @@ from . import script_analyzer as sa
 from .asset_manager import Asset
 from .config import ErroProducao, log
 from .storyboard import RITMOS, Cena, Secao
+from . import fundos3d
+from .motion_conteudo import CONTEUDO as CONTEUDO_MO
 from .visual_effects import PRESETS
 
 DUR_TRANSICAO = {"dissolve": 0.9, "dip_black": 1.2, "dip_gold": 1.4, "dip_white": 1.2, "corte": 0.0}
 MIN_CENA_S = 1.5  # cenas mais curtas são incorporadas à anterior
 MIN_PLANO_S = 2.2
+# Planos com cenário gerado por código: mais curtos e cortados nas frases da narração, alternando o plano aberto com um
+# reenquadramento fechado do mesmo cenário (algo novo na tela a cada poucos segundos, sem trocar de lugar).
+ALVO_SEM_IMAGEM = {"rapido": 3.6, "normal": 5.0, "lento": 6.5}
+ALTERNATIVAS = ("deriva", "pan_dir", "zoom_out", "pan_esq", "tilt_cima", "respiro", "zoom_in", "tilt_baixo")
 
 
 @dataclass
@@ -30,6 +36,7 @@ class CenaPlanejada:
     ancora_confiavel: bool
     planos_desejados: int = 1
     reserva_3d: bool = False  # o 1º plano será uma cena 3D (não precisa de imagem)
+    unico: bool = False       # a cena inteira é um plano só (composição de motion ou texto que a ocupa toda)
 
     @property
     def duracao(self) -> float:
@@ -122,17 +129,22 @@ def planejar_cenas(al: sa.Alinhamento, cenas: list[Cena], duracao_video: float, 
     for cp in resultado:
         alvo = RITMOS[cp.cena.ritmo] if cp.cena.ritmo != "normal" else plano_alvo_s
         cp.planos_desejados = _quantos_planos(cp, alvo)
+        cp.unico = cp.planos_desejados == 1 and _texto_ocupa_cena(cp)
         if cfgmo and cfgmo.get("ok") and cp.cena.mo and cp.duracao <= 16:   # a composição de motion ocupa a cena inteira
             cp.planos_desejados = 1
+            cp.unico = True
         cp.reserva_3d = _usa_3d_sempre(cp.cena, cfg3d) and cp.duracao / max(1, cp.planos_desejados) >= MIN_PLANO_S
     return resultado
 
 
+def _texto_ocupa_cena(cp: CenaPlanejada) -> bool:
+    return any(o["tipo"] in ("versiculo", "lista", "ponto", "titulo") for o in cp.cena.overlays) and cp.duracao <= 16
+
+
 def _quantos_planos(cp: CenaPlanejada, alvo: float) -> int:
-    d = cp.duracao
-    if any(o["tipo"] in ("versiculo", "lista", "ponto", "titulo") for o in cp.cena.overlays) and d <= 16:
+    if _texto_ocupa_cena(cp):
         return 1
-    return max(1, int(round(d / alvo)))
+    return max(1, int(round(cp.duracao / alvo)))
 
 
 # ----------------------------------------------------------------- cortes ---
@@ -180,7 +192,8 @@ def construir(
 ) -> Timeline:
     avisos = avisos if avisos is not None else []
     planos: list[Plano] = []
-    ultimo_preset = ""
+    historico: list[str] = []
+    cont_stills: dict = {}
     semente = 11
     for cp in planejadas:
         c = cp.cena
@@ -188,22 +201,37 @@ def construir(
         n_w = cp.planos_desejados
         if assets:
             n = min(n_w, max(len(assets), math.ceil(cp.duracao / (1.7 * (RITMOS[c.ritmo] if c.ritmo != "normal" else 11.0)))))
-        else:
+        elif cp.unico or cp.reserva_3d:
             n = max(1, min(n_w, math.ceil(cp.duracao / (1.7 * 11.0))))
+        else:
+            n = max(1, int(round(cp.duracao / ALVO_SEM_IMAGEM[c.ritmo])))
         n = max(1, min(n, int(cp.duracao // MIN_PLANO_S) or 1))
         cortes = _cortes(al, cp.inicio, cp.fim, n)
+        k_mo = 0                               # plano que recebe a composição de motion da cena
+        tf = _inicio_da_frase(c, cp, al, cfgmo)
+        if tf is not None and not assets and tf - cp.inicio >= 2.6:
+            # tipografia cinética que só começa no meio da cena: planos normais antes, a frase entra junto com a fala
+            n_pre = max(1, min(int(round((tf - cp.inicio) / ALVO_SEM_IMAGEM[c.ritmo])), int((tf - cp.inicio) // MIN_PLANO_S)))
+            cortes = _cortes(al, cp.inicio, tf, n_pre)[:-1] + [tf, cp.fim]
+            n, k_mo = len(cortes) - 1, len(cortes) - 2
+        remover = set(CONTEUDO_MO[c.mo].get("remove_overlays", [])) if (c.mo and cfgmo and cfgmo.get("ok") and c.mo in CONTEUDO_MO) else set()
         desloc = 1 if cp.reserva_3d else 0   # com 3D reservado no plano 0, as imagens vão para os planos seguintes
+        semente += 7                           # mesmo cenário em todos os planos da cena (os cortes mudam o ponto de vista)
+        still = fundos3d.escolher(c.secao, c.motivo, cont_stills) if (cfgmo and cfgmo.get("ok") and not assets and not c.mapa) else None
         for k in range(n):
             ini, fim = cortes[k], cortes[k + 1]
             idx_img = k - desloc
             asset = assets[idx_img] if 0 <= idx_img < len(assets) else None
             if cp.reserva_3d and k == 0:
                 asset = None
-            semente += 7
-            preset = _escolher_preset(c.camera, k, ultimo_preset, asset)
-            ultimo_preset = preset
             intens = 1.0 if c.ritmo != "lento" else 0.8
-            camera = {"preset": preset, "intensidade": intens}
+            if k % 2 == 1 and not assets and not c.mapa:
+                preset = "fechado"
+                camera = {"preset": preset, "intensidade": intens, "lado": 1.0 if (k // 2) % 2 == 0 else -1.0}
+            else:
+                preset = _escolher_preset(c.camera, k // 2 if not assets else k, historico, asset)
+                camera = {"preset": preset, "intensidade": intens}
+            historico.append(preset)
             video = (videos_por_cena or {}).get(c.id) if k == 0 and not cp.reserva_3d else None
             if video is not None and video.duracao >= (fim - ini) + 2.2:
                 asset = video  # filmagem licenciada (precisa durar mais que o plano, com folga para as transições)
@@ -225,16 +253,22 @@ def construir(
             else:
                 fundo = {"tipo": "motivo", "motivo": c.motivo, "semente": semente}
                 fonte = _fonte_codigo(f"cenário estilizado “{c.motivo}”")
+                if still:                          # cenário 3D estático (renderizado depois, em fundos3d.aplicar)
+                    fundo = {"tipo": "still3d", "still": still, "alternativa": fundo}
             if c.foco and asset is not None:
                 camera["foco"] = c.foco
             overlays = []
             if k == 0:
-                overlays.extend(dict(o) for o in c.overlays)
+                overlays.extend(dict(o) for o in c.overlays if not (k_mo > 0 and o["tipo"] in remover))
             if asset is not None and asset.exige_atribuicao and creditos_na_tela:
                 overlays.append({"tipo": "credito", "texto": _credito_tela(asset), "atraso": 1.0,
                                  "duracao": max(1.0, min(6.0, (fim - ini) - 1.6))})
             pedido3d = _pedido_3d(c, k, asset, fim - ini, cfg3d, creditos_na_tela)
-            motion = _pedido_motion(c, k, asset, fim - ini, cfgmo)
+            motion = _pedido_motion(c, k, asset, fim - ini, cfgmo, k_mo)
+            if motion and motion["comp"] == "frase":
+                tt = _tempos_da_frase(c, cp, al, cfgmo)
+                if tt:
+                    motion["ultima_palavra"] = round(tt[1], 3)
             if motion:                                   # a composição de motion substitui o 3D e traz a própria ficha informativa
                 pedido3d = None
                 overlays = [o for o in overlays if o["tipo"] not in ("capitulo", "credito", *motion.get("remove_overlays", []))]
@@ -246,9 +280,10 @@ def construir(
             )
             planos.append(plano)
             if k == 0 and len(planos) > 1:
-                planos[-1].transicao_entrada = {"tipo": c.transicao, "duracao": DUR_TRANSICAO[c.transicao]}
-            elif k > 0:
-                planos[-1].transicao_entrada = {"tipo": "dissolve", "duracao": DUR_TRANSICAO["dissolve"]}
+                tipo = _transicao_auto(c, planos[-2]) if c.transicao == "auto" else c.transicao
+                planos[-1].transicao_entrada = {"tipo": tipo, "duracao": DUR_TRANSICAO[tipo]}
+            # k > 0: corte seco no início da frase (o plano seguinte é outro ponto de vista do mesmo assunto)
+    _estender_frases(planos, al)
     _ajustar_transicoes(planos)
     eventos = _eventos_audio(planejadas, planos, secoes, duracao_video)
     sec = _spans_secoes(planos, secoes)
@@ -271,9 +306,34 @@ def _pedido_3d(c: Cena, k: int, asset: Asset | None, dur: float, cfg3d: dict | N
     return None
 
 
-def _pedido_motion(c: Cena, k: int, asset: Asset | None, dur: float, cfgmo: dict | None) -> dict | None:
+def _tempos_da_frase(c: Cena, cp: CenaPlanejada, al: sa.Alinhamento, cfgmo: dict | None) -> tuple[float, float] | None:
+    """Tipografia cinética: (primeira, última) palavra da frase em segundos absolutos, pelo alinhamento."""
+    if not cfgmo or not cfgmo.get("ok") or not c.mo or CONTEUDO_MO.get(c.mo, {}).get("comp") != "frase":
+        return None
+    from types import SimpleNamespace
+    from .motion_bridge import linhas_da_frase
+    falso = SimpleNamespace(inicio=cp.inicio, fim=cp.fim, duracao=cp.duracao)
+    linhas, achadas = linhas_da_frase(CONTEUDO_MO[c.mo]["params"]["texto"], falso, al)
+    if not achadas:
+        return None
+    ts = [w["t"] for l in linhas for w in l]
+    return cp.inicio + min(ts), cp.inicio + max(ts)
+
+
+def _inicio_da_frase(c: Cena, cp: CenaPlanejada, al: sa.Alinhamento, cfgmo: dict | None) -> float | None:
+    """Para cenas com tipografia cinética: instante (absoluto) em que a frase deve entrar — o início de frase/trecho da
+    fala logo antes da primeira palavra (até 1,5 s antes), ou 0,5 s antes dela."""
+    tt = _tempos_da_frase(c, cp, al, cfgmo)
+    if tt is None:
+        return None
+    ta = tt[0]
+    cand = [t for t in ({al.t_ini[f.palavra_ini] for f in al.frases} | set(_inicios_de_trecho(al))) if ta - 1.5 <= t <= ta - 0.1]
+    return max(cand) if cand else max(cp.inicio, ta - 0.5)
+
+
+def _pedido_motion(c: Cena, k: int, asset: Asset | None, dur: float, cfgmo: dict | None, k_mo: int = 0) -> dict | None:
     """Composição de motion para o plano k, se a cena tiver conteúdo, houver motor e (quando exigida) imagem."""
-    if not cfgmo or not cfgmo.get("ok") or not c.mo or k != 0 or dur < MIN_PLANO_S:
+    if not cfgmo or not cfgmo.get("ok") or not c.mo or k != k_mo or dur < MIN_PLANO_S:
         return None
     from .motion_conteudo import CONTEUDO
     ct = CONTEUDO[c.mo]
@@ -289,17 +349,49 @@ def _fonte_codigo(descricao: str) -> dict:
             "natureza": "ilustração gerada por código: não é fotografia nem registro histórico", "gerada_por_codigo": True}
 
 
-def _escolher_preset(preferidos: tuple[str, ...], k: int, anterior: str, asset: Asset | None) -> str:
+def _transicao_auto(c: Cena, anterior: Plano) -> str:
+    """Corte seco na fala, por padrão. Fusão só onde há passagem de tempo/espaço: mudança de seção sem transição própria
+    ou cena de ritmo lento (contemplação)."""
+    if anterior.secao != c.secao or c.ritmo == "lento":
+        return "dissolve"
+    return "corte"
+
+
+def _escolher_preset(preferidos: tuple[str, ...], k: int, historico: list[str], asset: Asset | None) -> str:
+    """Preset de câmera preferido pela cena, evitando repetir os movimentos dos planos mais recentes."""
+    recentes = [p for p in historico[-3:] if p != "fechado"]
+    anterior = recentes[-1] if recentes else ""
     if asset is not None and asset.largura / max(1, asset.altura) >= 2.3:
         return "pan_dir" if anterior != "pan_dir" else "pan_esq"
     cand = [preferidos[(k + i) % len(preferidos)] for i in range(len(preferidos))]
     for p in cand:
-        if p != anterior:
+        if p not in recentes:
             return p
-    for p in ("zoom_in", "deriva", "pan_dir", "zoom_out", "tilt_cima"):
-        if p != anterior and p in PRESETS:
-            return p
-    return cand[0]
+    uso = {p: historico[-12:].count(p) for p in ALTERNATIVAS}
+    livres = [p for p in ALTERNATIVAS if p not in recentes and p in PRESETS]
+    return min(livres, key=lambda p: (uso[p], ALTERNATIVAS.index(p))) if livres else cand[0]
+
+
+LEITURA_S = 1.3   # tempo mínimo de tela da frase depois da última palavra dita
+
+
+def _estender_frases(planos: list[Plano], al: sa.Alinhamento):
+    """Corte em L: se a última palavra da tipografia é dita perto do fim do plano, o plano avança sobre o seguinte (um plano
+    comum, que continua com duração mínima) para dar tempo de leitura."""
+    for i, p in enumerate(planos[:-1]):
+        m = p.motion
+        if not m or m.get("comp") != "frase" or "ultima_palavra" not in m:
+            continue
+        falta = m["ultima_palavra"] + LEITURA_S - p.fim
+        prox = planos[i + 1]
+        if falta <= 0.05 or prox.motion or prox.cena3d or prox.fundo.get("tipo") == "video":
+            continue
+        ext = min(falta, prox.duracao - MIN_PLANO_S)
+        if ext <= 0.05:
+            continue
+        p.fim = round(p.fim + ext, 4)
+        prox.inicio = p.fim
+        p.narracao, prox.narracao = sa.texto_entre(al, p.inicio, p.fim), sa.texto_entre(al, prox.inicio, prox.fim)
 
 
 def _ajustar_transicoes(planos: list[Plano]):
@@ -432,6 +524,7 @@ def coletar_pedidos_motion(tl: Timeline, al: sa.Alinhamento | None, pasta_imagen
                            limite: float | None = None) -> list:
     """Pedidos de composição de motion: duração visível = plano; pré/pós-rolagem = metade das transições vizinhas."""
     from .motion_bridge import PedidoMotion, montar_params, semente
+    from .motion_conteudo import CONTEUDO
     pedidos = []
     for i, p in enumerate(tl.planos):
         if not p.motion or (limite is not None and p.inicio >= limite):
@@ -443,10 +536,32 @@ def coletar_pedidos_motion(tl: Timeline, al: sa.Alinhamento | None, pasta_imagen
             d_out = prox["duracao"] if prox["tipo"] != "corte" else 0.0
         m = p.motion
         imagem = str((pasta_imagens / m["imagem"]).resolve()) if m.get("imagem") else None
+        if imagem is None and CONTEUDO[m["conteudo"]].get("fundo_do_plano"):
+            imagem = fundo_do_plano(p, pasta_imagens)
         pedidos.append(PedidoMotion(
             plano_id=p.id, conteudo=m["conteudo"], comp=m["comp"], dur_visivel=p.duracao, t0=d_in / 2, t1=d_out / 2,
             params=montar_params(m["conteudo"], p, al, batidas or []), imagem=imagem, seed=semente(p.id)))
     return pedidos
+
+
+def fundo_do_plano(p: Plano, pasta_imagens) -> str | None:
+    """Imagem do fundo do plano com a mesma correção de cor do filme (para composições que desenham sobre ele)."""
+    import hashlib
+    import json
+    from pathlib import Path
+    from .visual_effects import FonteVisual, aplicar_grade
+    f = dict(p.fundo)
+    if f["tipo"] not in ("motivo", "imagem", "mapa"):
+        return None
+    if f["tipo"] == "imagem" and not Path(f["arquivo"]).is_absolute():
+        f["arquivo"] = str(Path(pasta_imagens) / f["arquivo"])
+    chave = hashlib.sha1(json.dumps({"f": f, "cor": p.cor}, sort_keys=True).encode()).hexdigest()[:16]
+    destino = Path(pasta_imagens) / "trabalho" / "fundos-motion" / f"{chave}.jpg"
+    if not destino.is_file():
+        img, _ = FonteVisual._carregar(f, None)
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        aplicar_grade(img, p.cor, auto_contraste=f["tipo"] == "imagem" and not f.get("gerada")).save(destino, quality=93)
+    return str(destino.resolve())
 
 
 def aplicar_clipes_motion(tl: Timeline, pedidos: list, fps: int):

@@ -6,12 +6,16 @@ import { clamp01 } from './ease.js';
 
 // ------------------------------------------------------------------------------------ renderizador ---
 // O layout é sempre 1920×1080 px CSS; a resolução real do buffer vem do devicePixelRatio (prévias renderizam menos pixels).
-export function criarRenderizador(palco, { exposicao = 1.0, sombras = true, tipoSombra = THREE.PCFSoftShadowMap, antialias = (window.devicePixelRatio || 1) >= 1 } = {}) {   // prévias (escala < 1) dispensam o MSAA
+// window.RENDER3D (opcional, definido pelo render.mjs): { escala, msaa } — resolução interna do 3D relativa à saída e MSAA ligado/desligado.
+export function criarRenderizador(palco, { exposicao = 1.0, sombras = true, tipoSombra = THREE.PCFSoftShadowMap } = {}) {
+  const cfg = window.RENDER3D || {};
+  const pr = (window.devicePixelRatio || 1) * (cfg.escala ?? 1);
+  const antialias = cfg.msaa ?? (window.devicePixelRatio || 1) >= 1;                                  // prévias (escala < 1) dispensam o MSAA
   const cv = document.createElement('canvas');
   cv.style.cssText = 'position:absolute;left:0;top:0;width:1920px;height:1080px;display:none';        // o canvas WebGL não é exibido: ver `copiar`
   palco.appendChild(cv);
   const r = new THREE.WebGLRenderer({ canvas: cv, antialias, preserveDrawingBuffer: true, powerPreference: 'high-performance' });
-  r.setPixelRatio(window.devicePixelRatio || 1);
+  r.setPixelRatio(pr);
   r.setSize(1920, 1080, false);
   r.outputColorSpace = THREE.SRGBColorSpace;
   r.toneMapping = THREE.ACESFilmicToneMapping;
@@ -20,14 +24,17 @@ export function criarRenderizador(palco, { exposicao = 1.0, sombras = true, tipo
   // Espelho 2D: depois de renderizar, gl.finish() + readPixels bloqueiam até a GPU (SwiftShader) concluir o quadro e só então o buffer é
   // copiado para um canvas 2D. Assim a captura nunca pega um quadro anterior ainda não apresentado, mesmo com a máquina sob carga.
   const espelho = document.createElement('canvas');
-  espelho.width = cv.width; espelho.height = cv.height;
+  const dpr = window.devicePixelRatio || 1;
+  espelho.width = Math.round(1920 * dpr); espelho.height = Math.round(1080 * dpr);                    // sempre na resolução de saída
   espelho.style.cssText = 'position:absolute;left:0;top:0;width:1920px;height:1080px';
   palco.appendChild(espelho);
   const g = espelho.getContext('2d', { alpha: false });
+  g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
   const gl = r.getContext(), px = new Uint8Array(4);
   const copiar = () => {
     gl.finish(); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);     // leitura síncrona: bloqueia até a GPU (SwiftShader) terminar o quadro
-    g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'copy'; g.drawImage(cv, 0, 0); g.restore();
+    g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'copy';
+    g.drawImage(cv, 0, 0, espelho.width, espelho.height); g.restore();
   };
   return { r, cv, copiar };
 }
@@ -156,7 +163,7 @@ export function criarPoeira3D({ semente, n = 600, caixa, vel = [0.05, 0.02, 0.02
   for (let i = 0; i < n; i++) { pos[3 * i] = x0 + r() * (x1 - x0); pos[3 * i + 1] = y0 + r() * (y1 - y0); pos[3 * i + 2] = z0 + r() * (z1 - z0); sem[i] = r(); }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aSem', new THREE.BufferAttribute(sem, 1));
-  const m = new THREE.ShaderMaterial({ uniforms: { uT: { value: 0 }, uTam: { value: tam }, uPR: { value: window.devicePixelRatio || 1 }, uMin: { value: new THREE.Vector3(x0, y0, z0) }, uTam3: { value: new THREE.Vector3(x1 - x0, y1 - y0, z1 - z0) },
+  const m = new THREE.ShaderMaterial({ uniforms: { uT: { value: 0 }, uTam: { value: tam }, uPR: { value: (window.devicePixelRatio || 1) * ((window.RENDER3D || {}).escala ?? 1) }, uMin: { value: new THREE.Vector3(x0, y0, z0) }, uTam3: { value: new THREE.Vector3(x1 - x0, y1 - y0, z1 - z0) },
     uVel: { value: new THREE.Vector3(...vel) }, uCor: { value: new THREE.Color(cor) }, uOp: { value: op } }, vertexShader: POE_VS, fragmentShader: POE_FS, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false });
   const p = new THREE.Points(g, m); p.frustumCulled = false; p.renderOrder = 6;
   return p;
@@ -207,3 +214,26 @@ export function criarSol({ cor = 0xfff0d0, intensidade = 3, dir = [-0.5, 0.6, -0
 }
 
 export { hash32 };
+
+// ------------------------------------------------------------------------------------- névoa ---
+// Camada horizontal de névoa (ruído fractal que desliza devagar), visível só a média distância; função pura de uT.
+const NEVOA_VS = `varying vec3 vP; void main(){ vec4 w = modelMatrix * vec4(position,1.0); vP = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`;
+const NEVOA_FS = `
+varying vec3 vP; uniform float uT, op, perto, longe, esc; uniform vec3 cor;
+float h21(vec2 p){ p = fract(p*vec2(123.34,456.21)); p += dot(p,p+45.32); return fract(p.x*p.y); }
+float vn(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.-2.*f); return mix(mix(h21(i),h21(i+vec2(1,0)),f.x), mix(h21(i+vec2(0,1)),h21(i+vec2(1,1)),f.x), f.y); }
+float fbm(vec2 p){ float a=.5, s=0.; for(int i=0;i<4;i++){ s+=a*vn(p); p=p*2.02+vec2(5.3,1.7); a*=.5; } return s; }
+void main(){
+  vec2 q = vP.xz * esc + vec2(uT*0.004, uT*0.0015);
+  float n = fbm(q + fbm(q*1.7)*0.8);
+  float a = smoothstep(0.36, 0.76, n) * op;
+  float dist = length(vP - cameraPosition);
+  a *= smoothstep(perto * 0.3, perto, dist) * (1. - smoothstep(longe * 0.6, longe, dist));
+  gl_FragColor = vec4(cor * a, a);
+}`;
+export function criarNevoa({ y, cor, op = 0.5, esc = 0.004, perto = 60, longe = 1500, tam = 2400 }) {
+  const m = new THREE.ShaderMaterial({ uniforms: { uT: { value: 0 }, op: { value: op }, perto: { value: perto }, longe: { value: longe }, esc: { value: esc }, cor: { value: new THREE.Color(cor) } },
+    vertexShader: NEVOA_VS, fragmentShader: NEVOA_FS, transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false });
+  const p = new THREE.Mesh(new THREE.PlaneGeometry(tam, tam, 1, 1), m); p.rotation.x = -Math.PI / 2; p.position.y = y; p.renderOrder = 4; p.frustumCulled = false;
+  return p;
+}

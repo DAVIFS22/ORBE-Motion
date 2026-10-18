@@ -315,10 +315,11 @@ def verificar(video: Path, narracao_wav: Path, narr: dict, tl: Timeline, cfg: Co
     if faltando:
         res.add("imagens da linha do tempo", "falha", f"arquivo ausente para: {faltando[:5]}")
     else:
-        n_img = sum(1 for p in tl.planos if p.fundo.get("tipo") == "imagem")
+        n_still = sum(1 for p in tl.planos if p.fundo.get("tipo") == "imagem" and p.fundo.get("gerada"))
+        n_img = sum(1 for p in tl.planos if p.fundo.get("tipo") == "imagem") - n_still
         n_vid = sum(1 for p in tl.planos if p.fundo.get("tipo") == "video")
-        res.add("imagens da linha do tempo", "ok", f"{n_img} plano(s) com imagem baixada, {n_vid} com vídeo (cena 3D/filmagem); "
-                f"todos os arquivos existem; {len(tl.planos) - n_img - n_vid} com cenário gerado por código")
+        res.add("imagens da linha do tempo", "ok", f"{n_img} plano(s) com imagem real, {n_still} com cenário 3D estático (still), {n_vid} com vídeo "
+                f"(motion/3D/filmagem); todos os arquivos existem; {len(tl.planos) - n_img - n_still - n_vid} com cenário 2D gerado por código")
 
     if legendas_srt is not None and legendas_srt.is_file():
         lg = sg.ler_srt(legendas_srt)
