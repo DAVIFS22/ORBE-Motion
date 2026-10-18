@@ -90,9 +90,22 @@ class TestAvaliacao(unittest.TestCase):
                 rv.registrar_avaliacao(rod, notas, just, [], ["folha-99.png"])                # evidência inexistente
             with self.assertRaises(ErroProducao):
                 rv.registrar_avaliacao(rod, notas, {**just, "impacto_2s": ""}, [], ["folha-01.png"])
-            notas.pop("sincronia_audiovisual")
+            notas.pop("sincronia_narracao")
             with self.assertRaises(ErroProducao):
                 rv.registrar_avaliacao(rod, notas, just, [], ["folha-01.png"])
+
+    def test_notas_por_cena_entram_no_minimo_e_aceitam_nao_se_aplica(self):
+        with tempfile.TemporaryDirectory() as d:
+            rod = Path(d) / "rodada-01"
+            rod.mkdir()
+            (rod / "folha-01.png").write_bytes(b"x")
+            notas, just = self._dados(9)
+            a = rv.registrar_avaliacao(rod, notas, just, [], ["folha-01.png"], cenas={"tipografia": {"qualidade_3d": rv.NAO_SE_APLICA, "animacao_2d": 9}})
+            self.assertTrue(a["aprovado"])
+            with self.assertRaises(ErroProducao):                                          # cena abaixo de 8 exige os 3 piores problemas
+                rv.registrar_avaliacao(rod, notas, just, [], ["folha-01.png"], cenas={"golgota": {"qualidade_3d": 6}})
+            with self.assertRaises(ErroProducao):
+                rv.registrar_avaliacao(rod, notas, just, [], ["folha-01.png"], cenas={"x": {"categoria_inventada": 9}})
 
     def test_reprovada_exige_tres_problemas_e_aprovada_exige_todas_as_notas_8(self):
         with tempfile.TemporaryDirectory() as d:

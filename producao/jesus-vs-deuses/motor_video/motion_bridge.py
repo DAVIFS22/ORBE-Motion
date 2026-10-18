@@ -211,7 +211,7 @@ def renderizar_clipes(m: Motion, pedidos: list[PedidoMotion], cfg: Config, pasta
     pendentes: list[PedidoMotion] = []
     ativos: dict[str, str] = {}
     for p in pedidos:
-        p.chave = chave_pedido(p, fps, L, A, _sha(p.imagem), hash_codigo(p.comp))
+        p.chave = chave_pedido(p, fps, L, A, _sha(p.imagem), hash_codigo(p.comp) + (f"|e{cfg.motion_escala3d}" if p.comp.startswith('cena3d') else ''))
         destino = pasta_clipes / f"{p.conteudo}-{p.chave}.mp4"
         meta = Path(str(destino) + ".json")
         if destino.is_file() and destino.stat().st_size > 5_000 and meta.is_file():
@@ -230,7 +230,8 @@ def renderizar_clipes(m: Motion, pedidos: list[PedidoMotion], cfg: Config, pasta
             params["imagem"] = f"/ativo/{chave_img}"
         clipes.append({"id": p.plano_id, "comp": p.comp, "dur": round(p.dur_clipe, 4), "dur_visivel": round(p.dur_visivel, 4), "t0": round(p.t0, 4),
                        "seed": p.seed, "params": params, "saida": str(pasta_clipes / f"{p.conteudo}-{p.chave}.mp4")})
-    spec = {"largura": L, "altura": A, "fps": fps, "crf": cfg.motion_crf, "preset": cfg.motion_preset, "assets": ativos, "clipes": clipes}
+    spec = {"largura": L, "altura": A, "fps": fps, "crf": cfg.motion_crf, "preset": cfg.motion_preset, "assets": ativos, "clipes": clipes,
+            "render3d": {"escala": cfg.motion_escala3d, "msaa": True}}      # 3D: resolução interna (75 % com MSAA ≈ igual ao cheio, ~1,6× mais rápido)
     arq_spec = pasta_temp / "motion-spec.json"
     salvar_json(arq_spec, spec)
     cmd = [m.node, str(m.render), "--spec", str(arq_spec), "--workers", str(cfg.motion_trabalhadores), "--cancelar", str(cfg.saida / "CANCELAR.txt")]

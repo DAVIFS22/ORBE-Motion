@@ -63,6 +63,7 @@ class Config:
     motion_largura: int = 1920
     motion_altura: int = 1080
     motion_crf: int = 16
+    motion_escala3d: float = 0.75   # resolução interna das cenas 3D (75 % com MSAA: visualmente igual ao cheio, ~1,6× mais rápido)
     motion_preset: str = "medium"
     motion_trabalhadores: int = 3
     so_motion: bool = False         # renderiza apenas os clipes de motion e para

@@ -106,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
             rod = pasta / f"rodada-{args.rodada:02d}"
             dados = json.loads(Path(args.arquivo).read_text(encoding="utf-8"))
             aval = revisao.registrar_avaliacao(rod, dados["notas"], dados["justificativas"], dados.get("piores_problemas", []), dados["evidencias"],
-                                               dados.get("correcoes_aplicadas"))
+                                               dados.get("correcoes_aplicadas"), dados.get("cenas"))
             (pasta / "AVALIACAO.md").write_text(revisao.resumo_markdown(pasta), encoding="utf-8")
             print(f"Rodada {args.rodada}: nota mínima {aval['minimo']} -> {'APROVADA' if aval['aprovado'] else 'reprovada (corrija e gere nova rodada)'}")
             return 0 if aval["aprovado"] else 2

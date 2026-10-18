@@ -48,8 +48,13 @@ export const deus = {
     const placa = el('div', { left: (cxP - pw / 2) + 'px', top: (cyP - ph / 2) + 'px', width: pw + 'px', height: ph + 'px', transformStyle: 'preserve-3d' }, cena3d);
     el('div', { left: '0', top: '0', width: pw + 'px', height: ph + 'px', boxShadow: '0 60px 140px rgba(0,0,0,0.75), 0 0 0 1px rgba(255,235,190,0.10)', borderRadius: '5px' }, placa);
     const quadro = el('div', { left: '0', top: '0', width: pw + 'px', height: ph + 'px', overflow: 'hidden', borderRadius: '5px', background: PAPEL[P.fundoPlaca || 'papiro'], isolation: 'isolate' }, placa);
-    const im = el('img', { left: '0', top: '0', width: pw + 'px', height: ph + 'px', objectFit: 'cover', mixBlendMode: P.fundoPlaca === 'branco' ? 'multiply' : 'normal' }, quadro);
-    im.src = P.imagem;
+    // a ilustração vai para um canvas de resolução fixa (uma vez): numa <img> dentro da camada 3D o Chromium escolhe a escala de
+    // rasterização pelo primeiro quadro pintado, e quadros iguais saíam com ±1 de diferença conforme a ordem de captura
+    const dprP = window.devicePixelRatio || 1;
+    const im = canvas(Math.round(pw * dprP), Math.round(ph * dprP), { width: pw + 'px', height: ph + 'px', mixBlendMode: P.fundoPlaca === 'branco' ? 'multiply' : 'normal' }, quadro);
+    { const gi = im.getContext('2d'); gi.imageSmoothingEnabled = true; gi.imageSmoothingQuality = 'high';
+      const kc = Math.max(im.width / img.naturalWidth, im.height / img.naturalHeight);                 // object-fit: cover
+      gi.drawImage(img, (im.width - img.naturalWidth * kc) / 2, (im.height - img.naturalHeight * kc) / 2, img.naturalWidth * kc, img.naturalHeight * kc); }
     const brilho = el('div', { left: '-60%', top: '0', width: '80%', height: '100%', background: 'linear-gradient(105deg, rgba(255,240,205,0) 20%, rgba(255,240,205,0.30) 50%, rgba(255,240,205,0) 80%)', mixBlendMode: 'soft-light' }, quadro);
 
     // ficha (texto) e rodapé de procedência

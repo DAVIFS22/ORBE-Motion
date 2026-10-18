@@ -384,7 +384,7 @@ def _estender_frases(planos: list[Plano], al: sa.Alinhamento):
             continue
         falta = m["ultima_palavra"] + LEITURA_S - p.fim
         prox = planos[i + 1]
-        if falta <= 0.05 or prox.motion or prox.cena3d or prox.fundo.get("tipo") == "video":
+        if falta <= 0.05 or prox.motion or prox.cena3d or prox.fundo.get("tipo") == "video" or prox.secao != p.secao:   # não mexe nas fronteiras de seção (música)
             continue
         ext = min(falta, prox.duracao - MIN_PLANO_S)
         if ext <= 0.05:

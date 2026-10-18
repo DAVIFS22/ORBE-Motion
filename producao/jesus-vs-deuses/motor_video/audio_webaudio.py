@@ -252,7 +252,8 @@ def construir_stems_web(tl: Timeline, narr: dict, pasta_audio: Path, motion: Mot
         eventos.append({"t": round(ev["t"], 4), "tipo": tipo, "variante": k % 4, "dur": ev.get("dur", 0.0),
                         **{c: ev[c] for c in ("cena", "auto", "origem", "comp") if c in ev}})
     _acomodar_a_fala(eventos, narr)
-    spec = {"saida": pasta_audio / "webaudio", "ref": ref, "xf": XF, "cauda": CAUDA, "janela": 60, "total": total, "secoes": secoes,
+    spec = {"saida": pasta_audio / "webaudio", "cache": str(pasta_audio / "cache-webaudio"), "paralelo": 3,
+            "ref": ref, "xf": XF, "cauda": CAUDA, "janela": 60, "total": total, "secoes": secoes,
             "eventos": [{k: e[k] for k in ("t", "tipo", "variante", "dur", "ganhoDb") if k in e} for e in eventos]}
     man = _executar_node(motion, spec, pasta_audio, len(secoes))
 

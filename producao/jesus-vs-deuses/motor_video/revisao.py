@@ -21,7 +21,10 @@ from PIL import Image, ImageDraw, ImageFont
 
 from .config import ErroProducao, log, salvar_json
 
-CRITERIOS = ("impacto_2s", "legibilidade_celular", "qualidade_movimento", "variedade_visual", "coerencia_historica", "sincronia_audiovisual")
+# Categorias da direção visual (cada uma 1–10, meta ≥ 8) + o impacto dos 2 primeiros segundos (diretriz anterior).
+CRITERIOS = ("qualidade_3d", "animacao_2d", "camera_composicao", "integracao_2d_3d", "clareza_tela_pequena", "variedade_originalidade",
+             "coerencia_historica", "sincronia_narracao", "desempenho_estabilidade", "impacto_2s")
+NAO_SE_APLICA = "n/a"
 NOTA_MINIMA = 8
 EVENTOS_VISUAIS = {"revelar", "ping", "faixa", "rota"}
 
@@ -288,15 +291,25 @@ def gerar_rodada(cfg, tl: dict, grade: dict, pasta_imagens: Path, mix: Path | No
     return {"pasta": str(base), "folhas": [str(f) for f in folhas], "amostras": len(amostras), "metricas": met, "decisao": decisao}
 
 
-def registrar_avaliacao(pasta_rodada: Path, notas: dict, justificativas: dict, piores_problemas: list[dict], evidencias: list[str],
-                        correcoes_aplicadas: list[str] | None = None) -> dict:
-    """Etapa B/C: grava a avaliação. Exige: as seis notas (1–10), justificativa por nota e evidências (folhas/arquivos) existentes."""
-    faltam = [c for c in CRITERIOS if c not in notas]
+def _validar_notas(notas: dict, onde: str, exigir_todas: bool = True):
+    faltam = [c for c in CRITERIOS if c not in notas] if exigir_todas else []
     if faltam:
-        raise ErroProducao(f"Faltam notas para: {', '.join(faltam)}")
+        raise ErroProducao(f"Faltam notas para: {', '.join(faltam)} ({onde})")
     for c, v in notas.items():
-        if not (isinstance(v, (int, float)) and 1 <= v <= 10):
-            raise ErroProducao(f"Nota inválida em {c}: {v!r} (use 1 a 10)")
+        if c not in CRITERIOS:
+            raise ErroProducao(f"Categoria desconhecida em {onde}: {c}")
+        if v != NAO_SE_APLICA and not (isinstance(v, (int, float)) and 1 <= v <= 10):
+            raise ErroProducao(f"Nota inválida em {c} ({onde}): {v!r} (use 1 a 10 ou \"{NAO_SE_APLICA}\")")
+
+
+def registrar_avaliacao(pasta_rodada: Path, notas: dict, justificativas: dict, piores_problemas: list[dict], evidencias: list[str],
+                        correcoes_aplicadas: list[str] | None = None, cenas: dict | None = None) -> dict:
+    """Etapa B/C: grava a avaliação. Exige: todas as notas (1–10), justificativa por nota e evidências (folhas/arquivos) existentes.
+    `cenas` (opcional): notas por cena representativa {cena: {categoria: nota | "n/a"}}; a rodada só passa se todas forem ≥ 8."""
+    _validar_notas(notas, "geral")
+    for nome, n in (cenas or {}).items():
+        _validar_notas(n, f"cena {nome}", exigir_todas=False)
+    for c in notas:
         if not str(justificativas.get(c, "")).strip():
             raise ErroProducao(f"Falta a justificativa da nota de {c}")
     if not evidencias:
@@ -304,11 +317,12 @@ def registrar_avaliacao(pasta_rodada: Path, notas: dict, justificativas: dict, p
     ausentes = [e for e in evidencias if not (pasta_rodada / e).exists() and not Path(e).exists()]
     if ausentes:
         raise ErroProducao(f"Evidências inexistentes: {ausentes}")
-    if len(piores_problemas) != 3 and min(notas.values()) < NOTA_MINIMA:
+    valores = [v for v in notas.values() if v != NAO_SE_APLICA] + [v for n in (cenas or {}).values() for v in n.values() if v != NAO_SE_APLICA]
+    minimo = min(valores)
+    if len(piores_problemas) != 3 and minimo < NOTA_MINIMA:
         raise ErroProducao("Quando alguma nota é menor que 8, liste exatamente os 3 piores problemas.")
-    aval = {"rodada": pasta_rodada.name, "notas": notas, "justificativas": justificativas, "piores_problemas": piores_problemas,
-            "correcoes_aplicadas": correcoes_aplicadas or [], "evidencias": evidencias, "aprovado": all(v >= NOTA_MINIMA for v in notas.values()),
-            "minimo": min(notas.values())}
+    aval = {"rodada": pasta_rodada.name, "notas": notas, "cenas": cenas or {}, "justificativas": justificativas, "piores_problemas": piores_problemas,
+            "correcoes_aplicadas": correcoes_aplicadas or [], "evidencias": evidencias, "aprovado": minimo >= NOTA_MINIMA, "minimo": minimo}
     salvar_json(pasta_rodada / "avaliacao.json", aval)
     return aval
 
@@ -326,7 +340,13 @@ def resumo_markdown(pasta_revisao: Path) -> str:
         linhas += [f"## {a['rodada']} — {'APROVADA' if a['aprovado'] else 'reprovada (corrigir e repetir)'}", "",
                    "| Critério | Nota | Justificativa |", "|---|---|---|"]
         for c in CRITERIOS:
-            linhas.append(f"| {c.replace('_', ' ')} | {a['notas'][c]} | {a['justificativas'][c]} |")
+            if c in a["notas"]:
+                linhas.append(f"| {c.replace('_', ' ')} | {a['notas'][c]} | {a['justificativas'].get(c, '')} |")
+        if a.get("cenas"):
+            cols = [c for c in CRITERIOS if any(c in n for n in a["cenas"].values())]
+            linhas += ["", "Notas por cena representativa:", "", "| Cena | " + " | ".join(c.replace("_", " ") for c in cols) + " |", "|---|" + "---|" * len(cols)]
+            for nome, n in a["cenas"].items():
+                linhas.append(f"| {nome} | " + " | ".join(str(n.get(c, "–")) for c in cols) + " |")
         if a["piores_problemas"]:
             linhas += ["", "Três piores problemas:"] + [f"{i + 1}. {p.get('problema', p)} — correção: {p.get('correcao', '-')}" for i, p in enumerate(a["piores_problemas"])]
         if a["correcoes_aplicadas"]:
