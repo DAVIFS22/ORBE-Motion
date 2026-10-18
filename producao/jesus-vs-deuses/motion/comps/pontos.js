@@ -80,7 +80,7 @@ export const pontos = {
           o.rot.setAttribute('fill', eAtivo && ativo ? COR.ouro : COR.marfim);
           o.gr.setAttribute('opacity', String(entra * (1 - sai)));
         });
-        const tTit = ativo ? tA : 0.4;
+        const tTit = ativo ? Math.min(tA, Math.max(0.4, D - 2.3)) : 0.4;            // palavra dita tarde: o título entra antes, para dar tempo de ler
         eb.style.transform = `translateY(${((1 - prog(t, tTit - 0.5, tTit, outExpo)) * 100 + sai * -100).toFixed(1)}%)`;
         tt.style.transform = `translateY(${((1 - prog(t, tTit - 0.1, tTit + 0.5, outExpo)) * 100 + sai * -100).toFixed(1)}%)`;
         ss.style.transform = `translateY(${((1 - prog(t, tTit + 0.25, tTit + 0.8, outExpo)) * 100 + sai * -100).toFixed(1)}%)`;

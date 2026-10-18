@@ -32,6 +32,7 @@ export const mapa = {
     const fcfg = P.fichaCfg || { x: 90, y: 70, largura: 760, tamNome: 92 };
     const tp = { eyebrow: snap(0.3), nome: snap(0.5), regra: 0.9, periodo: 1.1, descricao: 1.4, fonte: 1.9 };
     const ficha = construirFicha(raiz, P.ficha, fcfg);
+    const zona = { x0: fcfg.x - 24, x1: fcfg.x + fcfg.largura + 24, y0: fcfg.y - 24, y1: ficha.fim + 24 };      // área do texto
     const rodape = P.rodape ? construirRodape(raiz, P.rodape, { x: fcfg.x, y: 960, largura: 800 }) : null;
     const final = criarCamadaFinal(raiz, { semente: spec.seed, poeira: { n: 40, brilho: 0.4 }, vinheta: 0.55, grao: 0.04 });
     const saida = D - 0.45;
@@ -106,13 +107,21 @@ export const mapa = {
           if (p.x < -200 || p.x > W + 300 || p.y < -50 || p.y > H + 200) continue;
           const sc = Math.max(0.7, Math.min(1.35, p.k));
           const alt = 130 * sc * k;
-          gt.strokeStyle = COR.ouro; gt.lineWidth = 3 * sc; gt.beginPath(); gt.moveTo(p.x, p.y); gt.lineTo(p.x, p.y - alt); gt.stroke();
           const rev = prog(t, m.t0 + 0.12, m.t0 + 0.75, outExpo);
+          // cartão sobre a ficha (título/texto)? some suavemente conforme a sobreposição (o ponto no chão continua)
+          gt.font = `600 ${Math.round(40 * sc)}px ${FONTE.ui}`;
+          const lx0 = p.x + 8 * sc, lx1 = lx0 + 36 * sc + gt.measureText(m.L.nome.toUpperCase()).width * 1.08, ly0 = p.y - alt - 70 * sc, ly1 = ly0 + 110 * sc;
+          const ov = Math.min(zona.x1 - lx0, lx1 - zona.x0, zona.y1 - ly0, ly1 - zona.y0);
+          const borda = Math.min(1, Math.max(0, (ly0 - 10) / 50), Math.max(0, (W - 10 - lx1) / 60));            // nem cortado pela borda da tela
+          const vis = (1 - smooth(Math.min(1, Math.max(0, ov / 60)))) * smooth(borda);
+          if (vis <= 0) continue;
+          gt.globalAlpha = vis;
+          gt.strokeStyle = COR.ouro; gt.lineWidth = 3 * sc; gt.beginPath(); gt.moveTo(p.x, p.y); gt.lineTo(p.x, p.y - alt); gt.stroke();
           gt.save(); gt.beginPath(); gt.rect(p.x + 8 * sc, p.y - alt - 70 * sc, 760 * sc * rev, 110 * sc); gt.clip();
           gt.textBaseline = 'alphabetic'; gt.shadowColor = 'rgba(0,0,0,0.9)'; gt.shadowBlur = 12;
           gt.font = `600 ${Math.round(40 * sc)}px ${FONTE.ui}`; gt.letterSpacing = `${Math.round(2.4 * sc)}px`; gt.fillStyle = COR.marfim; gt.fillText(m.L.nome.toUpperCase(), p.x + 18 * sc, p.y - alt - 22 * sc);
           if (m.L.sub) { gt.letterSpacing = '0px'; gt.font = `500 ${Math.round(28 * sc)}px ${FONTE.ui}`; gt.fillStyle = COR.ouro; gt.fillText(m.L.sub, p.x + 18 * sc, p.y - alt + 14 * sc); }
-          gt.restore(); gt.letterSpacing = '0px'; gt.shadowBlur = 0;
+          gt.restore(); gt.letterSpacing = '0px'; gt.shadowBlur = 0; gt.globalAlpha = 1;
         }
         gt.restore();
         ficha.aplicar(t, tp, saida);

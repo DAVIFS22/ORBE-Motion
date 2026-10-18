@@ -1,6 +1,6 @@
 // Linha do tempo histórica: régua que se amplia/desloca entre períodos, faixas de períodos, eventos com datas e a ficha.
 // Também serve de "cartão de data/fato": a janela se fecha no intervalo do fato e o ano aparece em destaque.
-// params: { janela:[{f,a,b}], periodos:[{nome,curto,ini,fim,lane,f,foco}], eventos:[{nome,sub,ano,aprox,f,nivel,foco}],
+// params: { janela:[{f,a,b}], periodos:[{nome,curto,ini,fim,lane,f,foco}], eventos:[{nome,sub,ano,aprox,f,foco}],
 //           ficha:{...}, rodape, batidas }
 // Anos astronômicos simplificados: negativo = a.C., positivo = d.C. (não existe ano zero na leitura histórica; não é usado).
 import { linha } from '../engine/tl.js';
@@ -9,7 +9,7 @@ import { prog, outCubic, outExpo, inOutCubic, smooth, aBatida, mola, clamp01 } f
 import { construirFicha, construirRodape } from '../engine/ficha.js';
 import { criarCamadaFinal } from '../engine/atmos.js';
 
-const W = 1920, H = 1080, X0 = 110, X1 = 1810, AX = 700;
+const W = 1920, H = 1080, X0 = 110, X1 = 1810, AX = 770;
 const NS = 'http://www.w3.org/2000/svg';
 const PASSOS = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000];
 
@@ -53,6 +53,20 @@ export const periodo = {
 
     const tp = { eyebrow: snap(0.3), nome: snap(0.5), regra: 0.9, periodo: 1.1, descricao: 1.4, fonte: 1.9 };
     const saida = D - 0.45;
+    // rótulos dos eventos: largura medida, nível automático (só sobe quando dois rótulos se sobrepõem na janela final),
+    // presos às margens da tela e sempre abaixo da ficha (a régua fica livre do texto)
+    const topoZona = ficha.fim + 26, Jf = P.janela[P.janela.length - 1];
+    const Xf = (a) => X0 + ((a - Jf.a) / (Jf.b - Jf.a)) * (X1 - X0);
+    const prender = (x, larg) => Math.min(Math.max(x, 70 + larg / 2), W - 70 - larg / 2);
+    const colocados = [];
+    evs.forEach((o) => {
+      o.larg = Math.max(o.n.getComputedTextLength(), o.s.getComputedTextLength());
+      const cx = prender(Xf(o.e.ano), o.larg); let nivel = 0;
+      while (colocados.some((c) => c.nivel === nivel && Math.abs(c.cx - cx) < (c.larg + o.larg) / 2 + 40)) nivel++;
+      colocados.push({ cx, larg: o.larg, nivel }); o.nivel = nivel;
+    });
+    const maxN = Math.max(0, ...evs.map((o) => o.nivel));
+    const passoN = maxN ? Math.max(72, Math.min(100, (AX - 115 - (topoZona + 40)) / maxN)) : 0;
     const eventos = [{ t: tp.nome, tipo: 'revelar' }];
     (P.eventos || []).forEach((e) => eventos.push({ t: snap(e.f * D), tipo: 'ping' }));
     (P.periodos || []).forEach((p) => eventos.push({ t: snap(p.f * D), tipo: 'faixa' }));
@@ -103,21 +117,26 @@ export const periodo = {
           const w = Math.max(0, (xb - xa) * k);
           b.r.setAttribute('x', xa); b.r.setAttribute('y', y); b.r.setAttribute('width', w); b.r.setAttribute('height', 50);
           b.r.setAttribute('fill', p.foco ? 'rgba(232,190,105,0.92)' : 'rgba(232,190,105,0.14)'); b.r.setAttribute('stroke', p.foco ? 'none' : 'rgba(232,190,105,0.65)'); b.r.setAttribute('stroke-width', 2);
-          b.cr.setAttribute('x', xa + 8); b.cr.setAttribute('y', y); b.cr.setAttribute('width', Math.max(0, w - 16)); b.cr.setAttribute('height', 50);
-          b.tx.textContent = (xb - xa) < 330 && p.curto ? p.curto : p.nome; b.tx.setAttribute('x', xa + 18); b.tx.setAttribute('y', y + 35); b.tx.setAttribute('fill', p.foco ? COR.tinta : COR.marfim); b.tx.setAttribute('opacity', String(k > 0.05 ? 1 : 0));
+          b.tx.textContent = (xb - xa) < 330 && p.curto ? p.curto : p.nome;
+          // o nome cabe na faixa? senão vai ao lado dela (à direita, ou à esquerda perto da borda), nunca cortado
+          const tw = b.tx.getComputedTextLength(), dentro = tw + 36 <= xb - xa, direita = xb + 16 + tw <= W - 60;
+          const tx = dentro ? xa + 18 : direita ? xb + 16 : xa - 16 - tw;
+          if (dentro) { b.cr.setAttribute('x', xa + 8); b.cr.setAttribute('width', Math.max(0, w - 16)); }
+          else { b.cr.setAttribute('x', tx - 4); b.cr.setAttribute('width', (tw + 8) * k); }
+          b.cr.setAttribute('y', y); b.cr.setAttribute('height', 50);
+          b.tx.setAttribute('x', tx); b.tx.setAttribute('y', y + 35); b.tx.setAttribute('fill', p.foco && dentro ? COR.tinta : COR.marfim); b.tx.setAttribute('opacity', String(k > 0.05 ? 1 : 0));
         });
         // eventos
         evs.forEach((o) => {
           const e = o.e; const t0 = snap(e.f * D); const k = prog(t, t0, t0 + 0.55, outExpo) * sai; const x = X(e.ano);
-          const alt = 100 + (e.nivel || 0) * 105;
+          const ty = AX - 115 - o.nivel * passoN, alt = AX - (ty + 58), lx = prender(x, o.larg);
           const vis = x > X0 - 40 && x < X1 + 40 ? 1 : 0;
           o.l.setAttribute('x1', x); o.l.setAttribute('x2', x); o.l.setAttribute('y1', AX); o.l.setAttribute('y2', AX - alt * k); o.l.setAttribute('opacity', String(vis * k));
           o.d.setAttribute('cx', x); o.d.setAttribute('cy', AX); o.d.setAttribute('r', String(11 * mola(prog(t, t0, t0 + 0.6, (u) => u), 5, 8))); o.d.setAttribute('opacity', String(vis * (k > 0 ? 1 : 0)));
-          const ty = AX - alt - 62;
-          o.n.setAttribute('x', x); o.n.setAttribute('y', ty); o.s.setAttribute('x', x); o.s.setAttribute('y', ty + 40);
+          o.n.setAttribute('x', lx); o.n.setAttribute('y', ty); o.s.setAttribute('x', lx); o.s.setAttribute('y', ty + 40);
           const revel = prog(t, t0 + 0.15, t0 + 0.8, outExpo);
-          const cw = 900; o.cr.setAttribute('x', x - cw / 2 + cw * (1 - revel) / 2 * 0); o.cr.setAttribute('y', ty - 56); o.cr.setAttribute('width', cw * revel); o.cr.setAttribute('height', 130);
-          o.cr.setAttribute('x', x - (cw * revel) / 2);
+          const cw = o.larg + 60; o.cr.setAttribute('y', ty - 56); o.cr.setAttribute('width', cw * revel); o.cr.setAttribute('height', 130);
+          o.cr.setAttribute('x', lx - (cw * revel) / 2);
           const op = String(vis * k > 0 ? Math.min(1, k * 2) * sai : 0); o.n.setAttribute('opacity', op); o.s.setAttribute('opacity', op);
         });
         // ano grande

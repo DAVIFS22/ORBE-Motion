@@ -55,7 +55,7 @@ export function construirFicha(pai, cfg, { x, y, largura, alinhar = 'esq' }) {
 
   // nome: tamanho ajustado para caber em uma linha
   let tamNome = cfg.tamNome || 152;
-  while (tamNome > 70 && (medirTexto(cfg.nome.toUpperCase(), `700 ${tamNome}px ${FONTE.display}`) + cfg.nome.length * tamNome * 0.02) * 1.05 > largura) tamNome -= 4;
+  while (tamNome > 52 && (medirTexto(cfg.nome.toUpperCase(), `700 ${tamNome}px ${FONTE.display}`) + cfg.nome.length * tamNome * 0.02) * 1.05 > largura) tamNome -= 4;
   const altNome = Math.round(tamNome * 1.12);
   const jan = el('div', { left: x + 'px', top: cy + 'px', width: largura + 'px', height: altNome + 'px', overflow: 'hidden' }, pai);
   const linhaNome = el('div', { left: '0', top: '0', whiteSpace: 'nowrap', display: 'flex', font: `700 ${tamNome}px/${altNome}px ${FONTE.display}`, letterSpacing: '0.02em', color: COR.marfim }, jan);
