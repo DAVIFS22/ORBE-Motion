@@ -46,8 +46,8 @@ function muralha({ x0, x1, z, h, mats, seed }) {          // muralha com torres 
 
 const VISTAS = {
   tempestade: {
-    ceu: { hor: 0x8a5a44, meio: 0x3a3540, zen: 0x0e1016, baixo: 0x221c18, sol: 0xff9a60, expo: 0.62, brilho: 0.7, nuvens: 1.0, cobertura: 0.86, nuvem: 0x5e5250, nuvemSombra: 0x121116 },
-    paraSol: [0.86, 0.07, -0.5], sol: [0xffa070, 2.0], hemi: [0x4a4e62, 0x2e241c, 0.5], nevoa: [0x3a3234, 0.0046], exposicao: 1.12,
+    ceu: { hor: 0xb86c46, meio: 0x4a4250, zen: 0x12141c, baixo: 0x2a221c, sol: 0xffa060, expo: 0.62, brilho: 0.95, nuvens: 1.0, cobertura: 0.82, nuvem: 0x7a6a66, nuvemSombra: 0x18161c },
+    paraSol: [0.86, 0.07, -0.5], sol: [0xffa070, 2.8], hemi: [0x5a5e74, 0x3a2e22, 0.62], nevoa: [0x4a3e3c, 0.0042], exposicao: 1.32,     // fim de tarde sob nuvens pesadas: escuro, mas legível
     trilho: { pos: [[-9, 4.5, 34], [-5, 7.5, 10], [-1.5, 12.5, -16]], alvo: [[0, 21, -60], [0, 23.5, -61], [0, 25, -62]], fov: [38, 30] },
     poeira: { n: 900, vel: [1.6, 0.15, 0.4], op: 0.55 }, feixes: 0,
   },
@@ -122,6 +122,25 @@ const def = {
     for (const [x, z, s, sd] of [[-14, 22, 2.6, 1], [-3, 30, 1.6, 2], [4, 18, 2.2, 3], [-20, 6, 3.0, 4], [10, 26, 1.4, 5], [-30, 12, 2.4, 6], [18, 4, 2.8, 7]]) {
       const m = malha(pedra(s, seed * 7 + sd), mats.pedra, { pos: [x, altura(x, z) - 0.25 * s, z] }); m.rotation.y = sd; cena.add(m);
     }
+
+    // vegetação rala de colina seca: arbustos baixos e touceiras de capim (escala e textura de primeiro plano)
+    const mArb = new THREE.MeshStandardMaterial({ color: 0x55573a, roughness: 1 }), mCap = new THREE.MeshStandardMaterial({ color: 0xb09a64, roughness: 1 });
+    const nA = 260, arb = new THREE.InstancedMesh(pedra(1, seed + 9), mArb, nA);
+    for (let i = 0; i < nA; i++) {
+      const a = rr() * Math.PI * 2, d = 9 + Math.pow(rr(), 0.6) * 90, x = TOPO[0] + Math.cos(a) * d * 1.25, z = TOPO[1] + Math.sin(a) * d, s = 0.6 + rr() * 0.9;
+      e.set(0, rr() * 6, 0); q.setFromEuler(e); m4.compose(new THREE.Vector3(x, altura(x, z) - 0.1 * s, z), q, new THREE.Vector3(s * 1.2, s * 1.05, s * 1.1)); arb.setMatrixAt(i, m4);
+    }
+    arb.castShadow = true; arb.receiveShadow = true; cena.add(arb);
+    const geoC = new THREE.ConeGeometry(0.035, 1, 3); geoC.translate(0, 0.5, 0);
+    const nC = 36000, cap = new THREE.InstancedMesh(geoC, mCap, nC);
+    for (let i = 0, k = 0; i < nC; i++) {
+      if (i % 12 === 0) k = i;                                                                // touceiras de 12 folhas
+      const r0 = rngFor(seed * 31 + k, 3), a = r0() * Math.PI * 2, d = 7 + Math.sqrt(r0()) * 95;                  // densidade uniforme na encosta
+      const x = TOPO[0] + Math.cos(a) * d * 1.25 + (rr() - 0.5) * 0.5, z = TOPO[1] + Math.sin(a) * d + (rr() - 0.5) * 0.5;
+      e.set((rr() - 0.5) * 0.7, rr() * 6, (rr() - 0.5) * 0.7); q.setFromEuler(e);
+      m4.compose(new THREE.Vector3(x, altura(x, z) - 0.05, z), q, new THREE.Vector3(1.2, 0.45 + rr() * 0.6, 1.2)); cap.setMatrixAt(i, m4);
+    }
+    cap.castShadow = true; cena.add(cap);
 
     // as três cruzes (a do centro mais alta, com a placa do título), no cume
     const yTopo = altura(TOPO[0], TOPO[1]);
