@@ -1,7 +1,7 @@
 // Rolo e lamparina — COMPOSIÇÃO ARTÍSTICA por código para os trechos sobre as Escrituras: um rolo aberto sobre uma mesa de
 // madeira, lamparina de barro acesa, sala de pedra na penumbra. A "escrita" do rolo é ESTILIZADA (traços abstratos em colunas):
 // não reproduz nenhum manuscrito nem texto real.
-// Vistas (params.vista): 'mesa' (câmera desliza sobre o rolo), 'lamparina' (a chama em primeiro plano, o rolo atrás),
+// Vistas (params.vista): 'mesa' (câmera desliza sobre o rolo), 'lamparina' (a chama em primeiro plano, o rolo atrás), 'cima', 'sala',
 //                        'rolo' (rente ao pergaminho, ao longo das colunas).
 import * as THREE from 'three';
 import { iniciar3D } from '../engine/base3d.js';
@@ -39,6 +39,8 @@ const VISTAS = {
   mesa: { pos: [[-0.25, 1.6, 1.05], [0.02, 1.5, 0.92], [0.28, 1.42, 0.82]], alvo: [[0.12, 0.79, -0.08], [0.2, 0.79, -0.09], [0.3, 0.79, -0.1]], fov: [40, 34] },
   lamparina: { pos: [[1.62, 0.96, 0.18], [1.55, 0.95, 0.12], [1.48, 0.94, 0.08]], alvo: [[0.9, 0.82, -0.4], [0.82, 0.82, -0.38], [0.72, 0.82, -0.34]], fov: [36, 32] },
   rolo: { pos: [[-0.62, 0.91, 0.22], [-0.4, 0.89, 0.19], [-0.15, 0.88, 0.16]], alvo: [[0.3, 0.8, -0.12], [0.5, 0.8, -0.12], [0.72, 0.8, -0.12]], fov: [40, 36] },
+  cima: { pos: [[-0.05, 1.95, 0.28], [0.2, 1.85, 0.16], [0.45, 1.78, 0.06]], alvo: [[0.05, 0.79, -0.14], [0.28, 0.79, -0.14], [0.5, 0.79, -0.14]], fov: [36, 30] },   // de cima: o texto do rolo e a lamparina
+  sala: { pos: [[-1.25, 1.5, 2.7], [-0.6, 1.42, 2.45], [0.0, 1.36, 2.2]], alvo: [[0.2, 0.92, -0.25], [0.3, 0.9, -0.25], [0.4, 0.88, -0.25]], fov: [46, 40] },  // o cômodo: mesa, parede e a luz da janela
 };
 
 const def = {

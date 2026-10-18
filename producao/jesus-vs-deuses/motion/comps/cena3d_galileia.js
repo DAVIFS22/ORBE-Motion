@@ -47,7 +47,7 @@ const VISTAS = {
   noite: {
     ceu: { hor: 0x2a3660, meio: 0x111a3c, zen: 0x04061a, baixo: 0x080a14, sol: 0xb8c6f0, expo: 0.6, brilho: 0.42, nuvens: 0, estrelas: 2.6, via: 2.8, disco: 1.6 },
     paraSol: [-0.26, 0.3, -0.92], sol: [0x9fb4ff, 0.55], hemi: [0x4a5a8a, 0x1a1c24, 0.35], nevoa: [0x1a2238, 0.0007], exposicao: 1.15, noite: true,
-    trilho: { pos: [[7, 1.5, -2], [8, 1.55, -5], [9, 1.6, -8]], alvo: [[10, 11, -80], [12, 14, -82], [14, 17, -84]], fov: [54, 50] },   // na beira d'água, avançando sobre o lago
+    trilho: { pos: [[2.5, 1.4, 0.5], [8.5, 1.55, -6], [15, 1.75, -13]], alvo: [[6, 9, -80], [13, 14, -82], [20, 18, -84]], fov: [56, 44] },   // na beira d'água, avançando sobre o lago
   },
   colinas_noite: {
     ceu: { hor: 0x2a3660, meio: 0x111a3c, zen: 0x04061a, baixo: 0x080a14, sol: 0xb8c6f0, expo: 0.6, brilho: 0.42, nuvens: 0, estrelas: 2.6, via: 2.8, disco: 1.6 },

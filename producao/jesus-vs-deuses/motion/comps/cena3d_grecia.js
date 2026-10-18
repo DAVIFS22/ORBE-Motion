@@ -11,6 +11,17 @@ import { smooth } from '../engine/ease.js';
 
 const norm = (v) => { const l = Math.hypot(...v); return v.map((x) => x / l); };
 
+// Tambor de coluna caído: cilindro com 20 caneluras rasas (sem elas o tambor liso lê como barril).
+function tamborCanelado(r, h) {
+  const g = new THREE.CylinderGeometry(r, r, h, 120, 1, false); const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), z = p.getZ(i), rr = Math.hypot(x, z); if (rr < r * 0.5) continue;           // tampas: só a borda
+    const f = 1 - 0.028 * Math.pow(0.5 + 0.5 * Math.cos(Math.atan2(z, x) * 20), 0.6); p.setX(i, x * f); p.setZ(i, z * f);
+  }
+  g.computeVertexNormals(); g.rotateZ(Math.PI / 2);
+  return g;
+}
+
 const def = {
   render: { exposicao: 1.0 },
   async montar({ cena, P, D, spec }) {
@@ -23,6 +34,7 @@ const def = {
 
     const tM1 = tex.marmore({ tam: 1024, semente: 52, tambores: 11, base: [232, 222, 200], veios: 0.35 });
     const tM2 = tex.marmore({ tam: 1024, semente: 54, tambores: 1, base: [232, 222, 202], veios: 0.3 });
+    const tM3 = R_ ? tex.marmore({ tam: 1024, semente: 57, tambores: 5, base: [214, 208, 196], veios: 0.25 }) : null;   // ruínas: calcário gasto, juntas discretas
     const tBloco = tex.blocos({ tam: 1024, semente: 56, fiadas: 5, comprimento: [0.5, 0.9], base: [222, 208, 180], desgaste: 0.5 });
     const tTerra = tex.terra({ tam: 1024, semente: 58, base: [140, 120, 78] });
     const tRocha = tex.rocha({ tam: 1024, semente: 59, base: [150, 140, 120] });
@@ -46,7 +58,8 @@ const def = {
       // Santuário em ruínas (genérico, não um sítio específico): crepidoma, colunas inteiras e quebradas em alturas
       // diferentes, um trecho de arquitrave, tambores caídos e blocos espalhados.
       const rr = rngFor(seed, 31), nF = 6, nL = 13, entre = 5.2, D = 2.25;
-      for (const k of ['fuste', 'capitel', 'arquitrave']) mats[k].color.setHex(0xcbb89c);              // mármore envelhecido
+      for (const k of ['fuste', 'capitel']) { mats[k].map = tM3.map; mats[k].normalMap = tM3.normalMap; mats[k].roughnessMap = tM3.roughnessMap ?? null; }
+      for (const k of ['fuste', 'capitel', 'arquitrave']) mats[k].color.setHex(0xd6d0c6);              // pedra envelhecida, cinza-clara (não alaranjada)
       const mFolha = new THREE.MeshStandardMaterial({ color: 0x55603c, roughness: 1 });
       const larg = (nF - 1) * entre + D * 1.6, comp = (nL - 1) * entre + D * 1.6;
       for (let k = 0; k < 3; k++) cena.add(malha(caixa(larg + (3 - k) * 1.4, 0.55, comp + (3 - k) * 1.4, { raio: 0.04, esc: 0.35 }), mats.degrau, { pos: [0, -1.45 + k * 0.55, 0] }));
@@ -63,10 +76,10 @@ const def = {
           c.position.set(x, yBase, z); cena.add(c);
           const topo = malha(rochedo(D * 0.42, seed * 100 + i * 13 + j), mats.fuste, { pos: [x, yBase + h - 0.05, z] }); topo.scale.y = 0.35; cena.add(topo);
         } else {                                                                // caída: tambores no chão ao lado
-          const n = 2 + Math.floor(rr() * 3), a = rr() * Math.PI * 2;
+          const n = 2 + Math.floor(rr() * 3); let a = rr() * Math.PI * 2;
+          if (x < 0 && Math.cos(a) < 0) a = Math.PI - a;                         // tambores caem para dentro: o caminho da câmera (oeste) fica livre
           for (let k = 0; k < n; k++) {
-            const tamb = new THREE.CylinderGeometry(D * 0.46, D * 0.48, 1.25, 24); tamb.rotateZ(Math.PI / 2);
-            const m = malha(tamb, mats.fuste, { pos: [x + Math.cos(a) * (2.2 + k * 1.35), -0.2 + D * 0.47 * 0.9, z + Math.sin(a) * (2.2 + k * 1.35)] });
+            const m = malha(tamborCanelado(D * 0.47, 1.25), mats.fuste, { pos: [x + Math.cos(a) * (2.2 + k * 1.35), -0.2 + D * 0.47 * 0.9, z + Math.sin(a) * (2.2 + k * 1.35)] });
             m.rotation.y = -a + (rr() - 0.5) * 0.4; cena.add(m);
           }
         }
@@ -127,7 +140,7 @@ const def = {
     cip.count = n; cip.castShadow = true; cip.receiveShadow = true; cip.instanceMatrix.needsUpdate = true; cena.add(cip);
 
     // luzes
-    const sol = criarSol({ cor: R_ ? 0xffb07a : 0xffd29a, intensidade: R_ ? 4.6 : 5.6, dir: paraSol, alvo: [0, 4, 0], dist: 160, caixa: 62, mapa: 4096, bias: -0.0003, normalBias: 0.07, near: 30, far: 380 });
+    const sol = criarSol({ cor: R_ ? 0xffc89a : 0xffd29a, intensidade: R_ ? 4.6 : 5.6, dir: paraSol, alvo: [0, 4, 0], dist: 160, caixa: 62, mapa: 4096, bias: -0.0003, normalBias: 0.07, near: 30, far: 380 });
     cena.add(sol, sol.target);
     cena.add(new THREE.HemisphereLight(0xa4aabc, 0x7a6040, 0.55));          // céu menos saturado: a sombra não fica azul demais
     const poeira = criarPoeira3D({ semente: seed, n: 500, caixa: [-45, 0, -45, 45, 22, 80], vel: [0.2, 0.04, -0.08], cor: 0xffe2b0, tam: 1.8, op: 0.6 });
