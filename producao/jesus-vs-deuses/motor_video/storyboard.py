@@ -41,6 +41,7 @@ class Cena:
     cena3d: dict | None = None  # {"cena", "prioridade" (1..3), "modo" ("sempre"|"sem_imagem"), "plano", "params"}
     paralaxe: float | None = None  # posição do horizonte (0..1) para paralaxe 2.5D de uma foto (P3)
     videos: list[str] = field(default_factory=list)  # consultas de filmagens licenciadas (Commons) para o 1º plano
+    mo: str | None = None  # conteúdo de motion graphics (motion_conteudo.POR_CENA): ficha animada, mapa, linha do tempo
 
     def validar(self):
         if self.motivo not in MOTIVOS:
@@ -141,8 +142,11 @@ def carregar(caminho=None) -> tuple[list[Cena], dict[str, Secao]]:
         from .storyboard_jesus import CENAS, SECOES
         cenas, secoes = CENAS, SECOES
     ids = set()
+    from .motion_conteudo import CONTEUDO
     for c in cenas:
         c.validar()
+        if c.mo is not None and c.mo not in CONTEUDO:
+            raise ErroProducao(f"Cena {c.id}: conteúdo de motion desconhecido {c.mo!r}")
         if c.id in ids:
             raise ErroProducao(f"Id de cena duplicado: {c.id}")
         ids.add(c.id)

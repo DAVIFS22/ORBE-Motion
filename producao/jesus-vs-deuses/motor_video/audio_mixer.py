@@ -169,6 +169,79 @@ def _escalar_pico(x: np.ndarray, pico_db: float) -> np.ndarray:
     return x * (_db(pico_db) / m) if m > 0 else x
 
 
+def pontos_automacao(tl: Timeline, total: float) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
+    """Automação de nível por seção (dB): crescendo da ressurreição, retirada dos efeitos no encerramento etc."""
+    pontos_m: list[tuple[float, float]] = []
+    pontos_x: list[tuple[float, float]] = [(0.0, 0.0)]
+    for s in tl.secoes:
+        ini, fim = s["inicio"], min(s["fim"], total + 1.5)
+        if ini >= total:
+            break
+        dur = fim - ini
+        clima = s["musica"]
+        if clima == "encerramento" and dur >= 6:   # efeitos e ambiência se retiram gradualmente até a pergunta final
+            pontos_x += [(ini + 1.0, 0.0), (fim - 6.0, -16.0)]
+        a_db, b_db = {"ressurreicao": (-24.0, 0.0), "comparacao": (-7.0, 0.0), "crucificacao": (0.0, -11.0)}.get(clima, (0.0, 0.0))
+        if not pontos_m:
+            pontos_m.append((0.0, a_db))
+        if dur >= 3.5:
+            pontos_m += [(ini + 1.5, a_db), (fim - 1.5, b_db)]
+        else:
+            pontos_m.append(((ini + fim) / 2, (a_db + b_db) / 2))
+    return pontos_m, pontos_x
+
+
+def finalizar_stems(tl: Timeline, total: float, limite: float | None, musica, efeitos, raw_m: Path, raw_x: Path,
+                    pontos_m: list, pontos_x: list, pasta_audio: Path, usados: list[dict]) -> dict:
+    """Automações dos eventos (silêncios, níveis, cauda final), proteção contra clipping e gravação dos stems 24 bits."""
+    cm, cx = Curva(total), Curva(total)
+    pontos_m = list(pontos_m)
+    pontos_x = list(pontos_x)
+    pontos_m.append((total, pontos_m[-1][1] if pontos_m else 0.0))
+    cm.chaves(pontos_m)
+    pontos_x.append((total, pontos_x[-1][1]))
+    cx.chaves(pontos_x)
+    # ---- automações dos eventos ----
+    for ev in tl.eventos_audio:
+        t, dur = ev["t"], ev.get("dur", 0.0)
+        if ev["tipo"] == "silencio":
+            cm.limitar(t, t + dur, -50.0, 0.5, 1.2)
+            cx.limitar(t, t + dur, -40.0, 0.5, 1.2)
+        elif ev["tipo"] == "musica_nivel":
+            modo = ev["modo"]
+            if modo == "baixo":
+                cm.limitar(t, t + dur, -7.0, 1.5, 2.0)
+            elif modo == "some":
+                cm.limitar(t, t + dur, -50.0, 2.0, 3.0)
+            elif modo == "cresce":
+                cm.somar_local(t, t + dur, 0.0, 5.0, manter=True)
+    # cauda final: a trilha e os efeitos se retiram com fade-out limpo
+    fim_fala = tl.duracao_audio
+    if fim_fala < total:
+        cm.somar_local(max(0.0, fim_fala - 1.0), total, 0.0, -45.0, manter=True)
+        cx.somar_local(max(0.0, fim_fala - 0.5), total, 0.0, -40.0, manter=True)
+    elif limite:  # prévia: fade-out curto no corte
+        cm.somar_local(total - 1.0, total, 0.0, -30.0, manter=True)
+        cx.somar_local(total - 1.0, total, 0.0, -30.0, manter=True)
+    cm.aplicar(musica)
+    cx.aplicar(efeitos)
+
+    saidas = {}
+    for nome, mm, raw in (("musica-stem.wav", musica, raw_m), ("efeitos-stem.wav", efeitos, raw_x)):
+        pico = float(np.abs(mm[:: 16]).max())
+        if pico > 0.98:  # segurança: evita clip no stem
+            mm[:] *= 0.95 / pico
+        mm.flush()
+        destino = pasta_audio / nome
+        executar(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "f32le", "-ar", str(SR), "-ac", "2", "-i", raw,
+                  "-c:a", "pcm_s24le", destino])
+        saidas[nome] = destino
+        del mm
+        raw.unlink(missing_ok=True)
+    salvar_json(pasta_audio / "fontes-de-audio.json", usados)
+    return {"musica": saidas["musica-stem.wav"], "efeitos": saidas["efeitos-stem.wav"], "fontes": usados}
+
+
 def construir_stems(tl: Timeline, narr: dict, pasta_audio: Path, pasta_musicas: list[Path] | None = None,
                     pasta_efeitos: list[Path] | None = None, limite: float | None = None) -> dict:
     """Gera `musica-stem.wav` e `efeitos-stem.wav` (24 bits, 48 kHz) e a lista de fontes usadas.
@@ -183,9 +256,7 @@ def construir_stems(tl: Timeline, narr: dict, pasta_audio: Path, pasta_musicas: 
     raw_m, raw_x = pasta_audio / "musica.f32", pasta_audio / "efeitos.f32"
     musica = np.memmap(raw_m, dtype=np.float32, mode="w+", shape=(N, 2))
     efeitos = np.memmap(raw_x, dtype=np.float32, mode="w+", shape=(N, 2))
-    cm, cx = Curva(total), Curva(total)
-    pontos_m: list[tuple[float, float]] = []
-    pontos_x: list[tuple[float, float]] = [(0.0, 0.0)]
+    pontos_m, pontos_x = pontos_automacao(tl, total)
     user_m, user_x = pasta_musicas or [], pasta_efeitos or []
     seed = 1
 
@@ -220,15 +291,6 @@ def construir_stems(tl: Timeline, narr: dict, pasta_audio: Path, pasta_musicas: 
         if clima == "encerramento":
             arp = _escalar_pico(syn.arpejo_piano(dur + 2.0, seed), ref - 8)
             _somar(musica, syn.fade(arp, 1.0, 3.0), ini)
-        if clima == "encerramento" and dur >= 6:   # efeitos e ambiência se retiram gradualmente até a pergunta final
-            pontos_x += [(ini + 1.0, 0.0), (fim - 6.0, -16.0)]
-        a_db, b_db = {"ressurreicao": (-24.0, 0.0), "comparacao": (-7.0, 0.0), "crucificacao": (0.0, -11.0)}.get(clima, (0.0, 0.0))
-        if not pontos_m:
-            pontos_m.append((0.0, a_db))
-        if dur >= 3.5:
-            pontos_m += [(ini + 1.5, a_db), (fim - 1.5, b_db)]
-        else:
-            pontos_m.append(((ini + fim) / 2, (a_db + b_db) / 2))
         for nome in s["ambiencia"]:
             seed += 1
             arq_amb = _achar_usuario(user_x, nome)
@@ -274,49 +336,7 @@ def construir_stems(tl: Timeline, narr: dict, pasta_audio: Path, pasta_musicas: 
         _somar(efeitos, x, t0)
         usados.append({"tipo": tipo, "t": ev["t"], "origem": origem, "cena": ev.get("cena")})
 
-    pontos_m.append((total, pontos_m[-1][1] if pontos_m else 0.0))
-    cm.chaves(pontos_m)
-    pontos_x.append((total, pontos_x[-1][1]))
-    cx.chaves(pontos_x)
-    # ---- automações dos eventos ----
-    for ev in tl.eventos_audio:
-        t, dur = ev["t"], ev.get("dur", 0.0)
-        if ev["tipo"] == "silencio":
-            cm.limitar(t, t + dur, -50.0, 0.5, 1.2)
-            cx.limitar(t, t + dur, -40.0, 0.5, 1.2)
-        elif ev["tipo"] == "musica_nivel":
-            modo = ev["modo"]
-            if modo == "baixo":
-                cm.limitar(t, t + dur, -7.0, 1.5, 2.0)
-            elif modo == "some":
-                cm.limitar(t, t + dur, -50.0, 2.0, 3.0)
-            elif modo == "cresce":
-                cm.somar_local(t, t + dur, 0.0, 5.0, manter=True)
-    # cauda final: a trilha e os efeitos se retiram com fade-out limpo
-    fim_fala = tl.duracao_audio
-    if fim_fala < total:
-        cm.somar_local(max(0.0, fim_fala - 1.0), total, 0.0, -45.0, manter=True)
-        cx.somar_local(max(0.0, fim_fala - 0.5), total, 0.0, -40.0, manter=True)
-    elif limite:  # prévia: fade-out curto no corte
-        cm.somar_local(total - 1.0, total, 0.0, -30.0, manter=True)
-        cx.somar_local(total - 1.0, total, 0.0, -30.0, manter=True)
-    cm.aplicar(musica)
-    cx.aplicar(efeitos)
-
-    saidas = {}
-    for nome, mm, raw in (("musica-stem.wav", musica, raw_m), ("efeitos-stem.wav", efeitos, raw_x)):
-        pico = float(np.abs(mm[:: 16]).max())
-        if pico > 0.98:  # segurança: evita clip no stem
-            mm[:] *= 0.95 / pico
-        mm.flush()
-        destino = pasta_audio / nome
-        executar(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "f32le", "-ar", str(SR), "-ac", "2", "-i", raw,
-                  "-c:a", "pcm_s24le", destino])
-        saidas[nome] = destino
-        del mm
-        raw.unlink(missing_ok=True)
-    salvar_json(pasta_audio / "fontes-de-audio.json", usados)
-    return {"musica": saidas["musica-stem.wav"], "efeitos": saidas["efeitos-stem.wav"], "fontes": usados}
+    return finalizar_stems(tl, total, limite, musica, efeitos, raw_m, raw_x, pontos_m, pontos_x, pasta_audio, usados)
 
 
 # ----------------------------------------------------------- mixagem final ---

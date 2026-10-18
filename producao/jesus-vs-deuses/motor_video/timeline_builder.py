@@ -54,6 +54,7 @@ class Plano:
     asset_id: str | None = None
     movimento: str = ""
     cena3d: dict | None = None  # pedido de cena 3D (Blender) para este plano, se elegível
+    motion: dict | None = None  # pedido de composição de motion graphics (Node/Chromium) para este plano, se elegível
 
     @property
     def duracao(self) -> float:
@@ -89,7 +90,7 @@ def _usa_3d_sempre(c: Cena, cfg3d: dict | None) -> bool:
 
 
 def planejar_cenas(al: sa.Alinhamento, cenas: list[Cena], duracao_video: float, plano_alvo_s: float = 11.0,
-                   avisos: list[str] | None = None, cfg3d: dict | None = None) -> list[CenaPlanejada]:
+                   avisos: list[str] | None = None, cfg3d: dict | None = None, cfgmo: dict | None = None) -> list[CenaPlanejada]:
     avisos = avisos if avisos is not None else []
     brutas: list[CenaPlanejada] = []
     pos = 0
@@ -121,6 +122,8 @@ def planejar_cenas(al: sa.Alinhamento, cenas: list[Cena], duracao_video: float, 
     for cp in resultado:
         alvo = RITMOS[cp.cena.ritmo] if cp.cena.ritmo != "normal" else plano_alvo_s
         cp.planos_desejados = _quantos_planos(cp, alvo)
+        if cfgmo and cfgmo.get("ok") and cp.cena.mo and cp.duracao <= 16:   # a composição de motion ocupa a cena inteira
+            cp.planos_desejados = 1
         cp.reserva_3d = _usa_3d_sempre(cp.cena, cfg3d) and cp.duracao / max(1, cp.planos_desejados) >= MIN_PLANO_S
     return resultado
 
@@ -173,7 +176,7 @@ def construir(
     al: sa.Alinhamento, planejadas: list[CenaPlanejada], secoes: dict[str, Secao],
     assets_por_cena: dict[str, list[Asset]], duracao_audio: float, duracao_video: float, fps: int,
     creditos_na_tela: bool = True, avisos: list[str] | None = None, mapa_pontos: dict | None = None,
-    cfg3d: dict | None = None, videos_por_cena: dict[str, Asset] | None = None,
+    cfg3d: dict | None = None, videos_por_cena: dict[str, Asset] | None = None, cfgmo: dict | None = None,
 ) -> Timeline:
     avisos = avisos if avisos is not None else []
     planos: list[Plano] = []
@@ -231,11 +234,15 @@ def construir(
                 overlays.append({"tipo": "credito", "texto": _credito_tela(asset), "atraso": 1.0,
                                  "duracao": max(1.0, min(6.0, (fim - ini) - 1.6))})
             pedido3d = _pedido_3d(c, k, asset, fim - ini, cfg3d, creditos_na_tela)
+            motion = _pedido_motion(c, k, asset, fim - ini, cfgmo)
+            if motion:                                   # a composição de motion substitui o 3D e traz a própria ficha informativa
+                pedido3d = None
+                overlays = [o for o in overlays if o["tipo"] not in ("capitulo", "credito", *motion.get("remove_overlays", []))]
             plano = Plano(
                 id=f"{c.id}#{k + 1}", cena_id=c.id, secao=c.secao, inicio=ini, fim=fim,
                 narracao=sa.texto_entre(al, ini, fim), descricao=c.descricao, fundo=fundo, camera=camera, cor=c.cor,
                 transicao_entrada={"tipo": "corte", "duracao": 0.0}, overlays=overlays, fonte=fonte,
-                asset_id=asset.id if asset else None, movimento=preset, cena3d=pedido3d,
+                asset_id=asset.id if asset else None, movimento=preset, cena3d=pedido3d, motion=motion,
             )
             planos.append(plano)
             if k == 0 and len(planos) > 1:
@@ -262,6 +269,18 @@ def _pedido_3d(c: Cena, k: int, asset: Asset | None, dur: float, cfg3d: dict | N
         return {"cena": "foto_2_5d", "prioridade": 3, "modo": "sempre",
                 "params": {"imagem": asset.arquivo_trabalho, "horizonte": c.paralaxe, "intensidade": 0.5, "_relativo_imagens": True}}
     return None
+
+
+def _pedido_motion(c: Cena, k: int, asset: Asset | None, dur: float, cfgmo: dict | None) -> dict | None:
+    """Composição de motion para o plano k, se a cena tiver conteúdo, houver motor e (quando exigida) imagem."""
+    if not cfgmo or not cfgmo.get("ok") or not c.mo or k != 0 or dur < MIN_PLANO_S:
+        return None
+    from .motion_conteudo import CONTEUDO
+    ct = CONTEUDO[c.mo]
+    if ct["exige_imagem"] and asset is None:
+        return None
+    return {"conteudo": c.mo, "comp": ct["comp"], "exige_imagem": ct["exige_imagem"], "imagem": asset.arquivo_trabalho if asset is not None else None,
+            "remove_overlays": list(ct.get("remove_overlays", []))}
 
 
 def _fonte_codigo(descricao: str) -> dict:
@@ -407,3 +426,55 @@ def aplicar_clipes_3d(tl: Timeline, pedidos: list, fps: int, creditos_na_tela: b
                     "autor": "ORBE Motion (código)", "licenca": "obra própria, sem material de terceiros", "url": "",
                     "natureza": "reconstrução/representação artística em 3D: não é fotografia nem registro histórico",
                     "gerada_por_codigo": True, "cena3d": ped.cena, "prioridade_3d": ped.prioridade}
+
+
+def coletar_pedidos_motion(tl: Timeline, al: sa.Alinhamento | None, pasta_imagens, batidas: list[float] | None = None,
+                           limite: float | None = None) -> list:
+    """Pedidos de composição de motion: duração visível = plano; pré/pós-rolagem = metade das transições vizinhas."""
+    from .motion_bridge import PedidoMotion, montar_params, semente
+    pedidos = []
+    for i, p in enumerate(tl.planos):
+        if not p.motion or (limite is not None and p.inicio >= limite):
+            continue
+        d_in = p.transicao_entrada["duracao"] if p.transicao_entrada["tipo"] != "corte" else 0.0
+        d_out = 0.0
+        if i + 1 < len(tl.planos):
+            prox = tl.planos[i + 1].transicao_entrada
+            d_out = prox["duracao"] if prox["tipo"] != "corte" else 0.0
+        m = p.motion
+        imagem = str((pasta_imagens / m["imagem"]).resolve()) if m.get("imagem") else None
+        pedidos.append(PedidoMotion(
+            plano_id=p.id, conteudo=m["conteudo"], comp=m["comp"], dur_visivel=p.duracao, t0=d_in / 2, t1=d_out / 2,
+            params=montar_params(m["conteudo"], p, al, batidas or []), imagem=imagem, seed=semente(p.id)))
+    return pedidos
+
+
+def aplicar_clipes_motion(tl: Timeline, pedidos: list, fps: int):
+    """Troca o fundo dos planos cujo clipe de motion foi gerado e inclui os eventos sonoros das revelações."""
+    por_id = {p.plano_id: p for p in pedidos}
+    novos = []
+    for pl in tl.planos:
+        ped = por_id.get(pl.id)
+        if ped is None or ped.status not in ("renderizado", "reaproveitado") or not ped.clipe:
+            continue
+        ficha = ped.params.get("ficha", {})
+        pl.fundo = {"tipo": "video", "arquivo": ped.clipe, "fps": fps, "inicio_clip": 0.0, "origem": "motion", "composicao": ped.comp}
+        pl.movimento = f"motion graphics ({ped.comp})"
+        pl.overlays = [o for o in pl.overlays if o["tipo"] not in ("credito", "rotulo", "capitulo", *((pl.motion or {}).get("remove_overlays", [])))]
+        pl.cena3d = None
+        cena3d_js = ped.comp.startswith("cena3d_")
+        pl.fonte = {"origem": ("Cena 3D por código (Three.js/WebGL, geometria e texturas procedurais)" if cena3d_js
+                               else "Motion graphics (HTML/CSS/SVG/Canvas/GSAP, gerado por código)"), "titulo": f"{ped.comp}: {ficha.get('nome', ped.conteudo)}",
+                    "autor": "ORBE Motion (código)", "licenca": "obra própria; imagem fornecida pelo usuário: licença não verificada" if ped.imagem else "obra própria, sem material de terceiros",
+                    "url": "", "natureza": ("reconstrução artística por código: não é evidência arqueológica nem fotografia" if cena3d_js
+                                            else "gráfico informativo animado; ilustrações modernas não são fontes históricas"),
+                    "gerada_por_codigo": True, "composicao": ped.comp, "categoria_informacao": ficha.get("categoria")}
+        proprios = {e.get("tipo") for e in ped.eventos}
+        if proprios & {"impacto", "whoosh"}:       # o clipe traz o próprio impacto/whoosh sincronizado: tira o do storyboard nesta cena
+            tl.eventos_audio = [ev for ev in tl.eventos_audio if not (ev.get("cena") == pl.cena_id and ev["tipo"] in proprios & {"impacto", "whoosh"})]
+        for e in ped.eventos:
+            if e.get("tipo") in ("revelar", "ping", "faixa", "rota", "whoosh", "impacto"):
+                novos.append({"t": round(pl.inicio + float(e["t"]), 3), "tipo": e["tipo"], "cena": pl.cena_id})
+    if novos:
+        tl.eventos_audio.extend(novos)
+        tl.eventos_audio.sort(key=lambda ev: ev["t"])

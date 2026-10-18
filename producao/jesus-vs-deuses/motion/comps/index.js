@@ -1,0 +1,11 @@
+import { teste } from './teste.js';
+import { teste3d } from './teste3d.js';
+import { deus } from './deus.js';
+import { mapa } from './mapa.js';
+import { periodo } from './periodo.js';
+import { cena3d_abertura } from './cena3d_abertura.js';
+import { cena3d_egito } from './cena3d_egito.js';
+import { cena3d_grecia } from './cena3d_grecia.js';
+import { cena3d_fiorde } from './cena3d_fiorde.js';
+import { cena3d_judeia } from './cena3d_judeia.js';
+export const COMPS = { teste, teste3d, deus, mapa, periodo, cena3d_abertura, cena3d_egito, cena3d_grecia, cena3d_fiorde, cena3d_judeia };

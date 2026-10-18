@@ -633,6 +633,7 @@ _ATRIBUICOES_3D = {
     "c01-seculos": T3D("mapa_3d", 2, lugares=["Roma", "Jerusalém"]),
     "d12-diferenca": T3D("mapa_3d", 2, lugares=["Atenas", "Roma", "Oslo"]),
 }
+from .motion_conteudo import POR_CENA as _MOTION  # fichas animadas, mapas e linhas do tempo (motion graphics)
 # fotos de paisagem que podem ganhar paralaxe 2.5D (P3, opcional): posição do horizonte na foto
 _PARALAXE = {"c05-nazare": 0.5, "e18-belem": 0.5, "g14-vitoria": 0.55, "k09-proposito": 0.55, "k25-decidir": 0.5}
 
@@ -677,3 +678,5 @@ for _c in CENAS:
         _c.cena3d = _ATRIBUICOES_3D[_c.id]
     if _c.id in _PARALAXE:
         _c.paralaxe = _PARALAXE[_c.id]
+    if _c.id in _MOTION:
+        _c.mo = _MOTION[_c.id]

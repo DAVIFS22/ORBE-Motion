@@ -12,8 +12,10 @@ from pathlib import Path
 from . import VERSAO_MOTOR
 from . import asset_manager as am
 from . import blender_bridge as bb
+from . import motion_bridge as mb
+from . import revisao
 from . import geodados
-from . import audio_mixer, image_research, media_ingestion, procedural_art, project_report, quality_checker
+from . import audio_mixer, audio_webaudio as aw, image_research, media_ingestion, procedural_art, project_report, quality_checker
 from . import script_analyzer as sa
 from . import storyboard as sb
 from . import subtitle_generator as sg
@@ -53,6 +55,18 @@ def _ler_alinhamento(cfg: Config, entradas, avisos: list[str], duracao_audio: fl
     return sa.alinhar(texto, cues), texto, cues
 
 
+def _procedencia(arq: Path) -> dict:
+    """Dados de autoria/licença da imagem fornecida (procedencia.json na mesma pasta, chave = nome do arquivo)."""
+    f = arq.parent / "procedencia.json"
+    if not f.is_file():
+        return {}
+    try:
+        return json.loads(f.read_text(encoding="utf-8")).get(arq.name, {})
+    except (OSError, ValueError):
+        log().warning("procedencia.json ilegível em %s: ignorado.", f)
+        return {}
+
+
 def _pesquisar_imagens(cfg: Config, planejadas, gerenciador: am.GerenciadorAssets, entradas) -> tuple[dict, dict, str]:
     """Obtém as imagens de cada cena. Devolve ({cena: [Asset]}, descrição do estado da rede)."""
     por_cena: dict[str, list[am.Asset]] = {}
@@ -82,7 +96,7 @@ def _pesquisar_imagens(cfg: Config, planejadas, gerenciador: am.GerenciadorAsset
         achadas: list[am.Asset] = []
         for arq in sorted(locais.get(c.id, [])):
             try:
-                achadas.append(gerenciador.importar_local(arq, c.id))
+                achadas.append(gerenciador.importar_local(arq, c.id, _procedencia(arq)))
             except am.ImagemInvalida as e:
                 gerenciador.registrar_falha(c.id, None, f"imagem local {arq.name}: {e}")
         faltam = cp.planos_desejados - len(achadas) - (1 if cp.reserva_3d else 0)
@@ -146,6 +160,38 @@ def _cenas_3d(cfg: Config, blender, pedidos, tl, gerenciador, avisos, etapas) ->
     return cfg.so_3d
 
 
+def _resumo_revisao(cfg: Config) -> str | None:
+    """Uma linha com o resultado das rodadas de revisão registradas (09-revisao/rodada-NN/avaliacao.json), se houver."""
+    import json as _json
+    pasta = cfg.saida / "09-revisao"
+    rodadas = sorted(pasta.glob("rodada-*/avaliacao.json")) if pasta.is_dir() else []
+    if not rodadas:
+        return None
+    ult = _json.loads(rodadas[-1].read_text(encoding="utf-8"))
+    return (f"{len(rodadas)} rodada(s); a última ({ult['rodada']}) teve nota mínima {ult['minimo']} e foi "
+            f"{'aprovada' if ult['aprovado'] else 'reprovada'}. Detalhes em `09-revisao/AVALIACAO.md`.")
+
+
+def _cenas_motion(cfg: Config, motion, pedidos, tl, etapas):
+    """Renderiza (ou reaproveita) os clipes de motion e troca o fundo dos planos correspondentes."""
+    log().info(mb.descrever(pedidos))
+    ultimo = {"t": 0.0}
+
+    def prog(pid, feitos, total):
+        if time.monotonic() - ultimo["t"] > 5 or feitos == total:
+            ultimo["t"] = time.monotonic()
+            log().info("   [motion] %s: quadro %d/%d (%d%%)", pid, feitos, total, 100 * feitos // total)
+
+    mb.renderizar_clipes(motion, pedidos, cfg, cfg.pasta(PASTAS["timeline"]) / "clipes-motion", cfg.pasta(PASTAS["temp"]) / "motion", cfg.fps, prog)
+    ok = [p for p in pedidos if p.status in ("renderizado", "reaproveitado")]
+    for p in pedidos:
+        if p.status == "falhou":
+            log().warning("   motion %s falhou (o plano usa o visual alternativo): %s", p.plano_id, p.detalhe)
+    tb.aplicar_clipes_motion(tl, ok, cfg.fps)
+    log().info("%d clipe(s) de motion aplicados (%d novos, %d em cache).", len(ok), sum(1 for p in ok if p.status == "renderizado"),
+               sum(1 for p in ok if p.status == "reaproveitado"))
+
+
 def produzir(cfg: Config, pasta_entrada: Path | None = None, comando: str = "") -> int:
     cfg.saida.mkdir(parents=True, exist_ok=True)
     _, arquivo_log = configurar_log(cfg.saida)
@@ -179,7 +225,12 @@ def produzir(cfg: Config, pasta_entrada: Path | None = None, comando: str = "") 
             avisos.append("Blender não encontrado: as cenas 3D foram desativadas e os planos usam imagens/cenários alternativos. "
                           "Instale o Blender (https://www.blender.org) ou 'pip install bpy' e informe --blender, se necessário.")
         cfg3d = {"blender_ok": blender is not None, "prioridade": cfg.prioridade_3d}
-        planejadas = tb.planejar_cenas(al, cenas, duracao_video, cfg.plano_alvo_s, avisos, cfg3d)
+        motion = mb.localizar_motion() if cfg.motion else None
+        if cfg.motion and motion is None:
+            avisos.append("Motion graphics desativados: Node.js 18+ com 'npm install' em motion/ e o Chromium do Playwright são necessários. "
+                          "As cenas usam imagens/cenários alternativos e o 3D do Blender.")
+        cfgmo = {"ok": motion is not None}
+        planejadas = tb.planejar_cenas(al, cenas, duracao_video, cfg.plano_alvo_s, avisos, cfg3d, cfgmo)
         log().info("%d cenas ancoradas no roteiro; %d planos desejados", len(planejadas), sum(c.planos_desejados for c in planejadas))
 
         etapas.inicio("4/9 Pesquisa e download de imagens")
@@ -192,9 +243,17 @@ def produzir(cfg: Config, pasta_entrada: Path | None = None, comando: str = "") 
 
         etapas.inicio("5/9 Linha do tempo")
         _, pontos = procedural_art.mapa_esquematico()
-        tl = tb.construir(al, planejadas, secoes, por_cena, duracao_audio, duracao_video, cfg.fps, cfg.creditos_na_tela, avisos, pontos, cfg3d, videos_cena)
+        tl = tb.construir(al, planejadas, secoes, por_cena, duracao_audio, duracao_video, cfg.fps, cfg.creditos_na_tela, avisos, pontos, cfg3d, videos_cena, cfgmo)
         pasta_tl = cfg.pasta(PASTAS["timeline"])
         log().info("%d planos cobrindo 0 – %.2f s", len(tl.planos), tl.duracao_video)
+
+        etapas.inicio("5a/9 Grade de batidas planejada (beats.json)")
+        total_audio = min(tl.duracao_video, cfg.limite_segundos) if cfg.limite_segundos else tl.duracao_video
+        grade = aw.grade_planejada(tl, total_audio)
+        pasta_audio = cfg.pasta(PASTAS["audio"])
+        aw.escrever_beats(grade, pasta_audio / "beats.json")
+        log().info("%d batidas em %d seção(ões); andamentos: %s", len(grade["batidas"]), len(grade["secoes"]),
+                   ", ".join(f"{s['clima']} {s['bpm']:g}" for s in grade["secoes"]))
 
         etapas.inicio("5b/9 Cenas 3D (Blender), pontuais e por prioridade")
         pedidos = tb.coletar_pedidos_3d(tl, cfg.limite_segundos)
@@ -202,6 +261,16 @@ def produzir(cfg: Config, pasta_entrada: Path | None = None, comando: str = "") 
         salvar_json(pasta_tl / "linha-do-tempo.json", tl.para_dict())
         salvar_json(pasta_tl / "cenas-3d.json", [asdict(p) for p in pedidos])
         if parar:
+            return 0
+
+        etapas.inicio("5c/9 Motion graphics (fichas, mapas e linhas do tempo animados)")
+        batidas = [b["t"] for b in grade["batidas"]]
+        pedidos_mo = tb.coletar_pedidos_motion(tl, al, cfg.pasta(PASTAS["imagens"]), batidas, cfg.limite_segundos)
+        if motion is not None and pedidos_mo:
+            _cenas_motion(cfg, motion, pedidos_mo, tl, etapas)
+        salvar_json(pasta_tl / "linha-do-tempo.json", tl.para_dict())
+        salvar_json(pasta_tl / "cenas-motion.json", [asdict(p) for p in pedidos_mo])
+        if cfg.so_motion:
             return 0
 
         etapas.inicio("6/9 Legendas")
@@ -215,13 +284,37 @@ def produzir(cfg: Config, pasta_entrada: Path | None = None, comando: str = "") 
 
         etapas.inicio("7/9 Áudio: trilha, efeitos e mixagem")
         narr = audio_mixer.medir_narracao(entradas.narracao_wav)
-        pasta_audio = cfg.pasta(PASTAS["audio"])
         canais = int(ffprobe_json(entradas.narracao_wav)["streams"][0].get("channels", 2))
         dur_mix = min(tl.duracao_video, cfg.limite_segundos) if cfg.limite_segundos else tl.duracao_video
-        stems = audio_mixer.construir_stems(tl, narr, pasta_audio, entradas.musicas, entradas.efeitos, cfg.limite_segundos)
+        stems = None
+        usar_web = cfg.audio_web and motion is not None and not entradas.musicas and not entradas.efeitos
+        if usar_web:
+            try:
+                stems = aw.construir_stems_web(tl, narr, pasta_audio, motion, cfg.limite_segundos, grade)
+                aw.marcos_para_grade(grade, stems["manifesto"])
+                grade = aw.medir_grade(stems["musica"], grade)
+                aw.escrever_beats(grade, pasta_audio / "beats.json")
+                conf = [s for s in grade["secoes"] if s.get("medicao", {}).get("confirmada")]
+                log().info("Grade de batidas confirmada por onsets no áudio: %d de %d seções (pulsos percussivos detectados nos instantes planejados).",
+                           len(conf), len(grade["secoes"]))
+            except ErroProducao as e:
+                avisos.append(f"A trilha Web Audio falhou ({str(e)[:160]}); foi usada a síntese NumPy.")
+                log().warning(avisos[-1])
+                stems = None
+        if stems is None:
+            stems = audio_mixer.construir_stems(tl, narr, pasta_audio, entradas.musicas, entradas.efeitos, cfg.limite_segundos)
         mix = pasta_audio / "mix-final-48k24.wav"
         info_mix = audio_mixer.mixar(entradas.narracao_wav, canais, stems["musica"], stems["efeitos"], dur_mix, narr, mix,
                                      cfg.loudness_alvo)
+
+        if cfg.revisao_rodada:
+            etapas.inicio(f"7a/9 Revisão (rodada {cfg.revisao_rodada}): folhas de contato por batida")
+            res_rev = revisao.gerar_rodada(cfg, tl.para_dict(), grade, cfg.pasta(PASTAS["imagens"]), mix, stems["musica"], stems["efeitos"],
+                                           cfg.revisao_rodada, cfg.limite_segundos)
+            etapas.fim()
+            print(f"Revisão pronta em {res_rev['pasta']}: {res_rev['amostras']} quadros em {len(res_rev['folhas'])} folha(s). "
+                  "Avalie as folhas e registre as notas com: python -m motor_video avaliar ...")
+            return 0
 
         etapas.inicio("8/9 Renderização do vídeo")
         pasta_temp = cfg.pasta(PASTAS["temp"])
@@ -247,17 +340,20 @@ def produzir(cfg: Config, pasta_entrada: Path | None = None, comando: str = "") 
             "timeline": {"cenas": len(planejadas), "planos": len(tl.planos),
                          "planos_com_imagem": sum(1 for p in tl.planos if p.asset_id),
                          "planos_3d": sum(1 for p in tl.planos if p.id in ids_3d),
-                         "planos_video": sum(1 for p in tl.planos if p.fundo.get("tipo") == "video" and p.id not in ids_3d),
+                         "planos_video": sum(1 for p in tl.planos if p.fundo.get("tipo") == "video" and p.id not in ids_3d and p.fundo.get("origem") != "motion"),
+                         "planos_motion": sum(1 for p in tl.planos if p.fundo.get("origem") == "motion"),
                          "planos_gerados": sum(1 for p in tl.planos if not p.asset_id and p.id not in ids_3d and p.fundo.get("tipo") != "video"),
                          "transicoes": dict(Counter(p.transicao_entrada["tipo"] for p in tl.planos))},
+            "cenas_motion": [asdict(p) for p in pedidos_mo], "motion": (f"node {motion.versao_node}" if motion else None),
             "assets": assets, "pendencias": gerenciador.pendencias, "falhas_download": gerenciador.falhas, "rede": estado_rede,
-            "audio": {"narracao_rms_db": narr["rms_ativo_db"], "narracao_pico_db": narr["pico_db"], "fontes": stems["fontes"],
+            "beats": {"arquivo": str(pasta_audio / "beats.json"), "planejadas": len(grade["batidas"]), "secoes": grade["secoes"]},
+            "audio": {"motor": "webaudio" if "manifesto" in stems else "numpy", "narracao_rms_db": narr["rms_ativo_db"], "narracao_pico_db": narr["pico_db"], "fontes": stems["fontes"],
                       "mix_lufs": info_mix["entrada"]["input_i"], "alvo_lufs": info_mix["alvo_lufs"], "true_peak": info_mix["true_peak_max"]},
             "render": stats, "qc": res.para_dict(), "cenas3d": [asdict(p) for p in pedidos],
             "blender": (f"{blender.tipo}: {blender.caminho} (versão {blender.versao})" if blender else None),
             "config3d": {"prioridade": cfg.prioridade_3d, "qualidade": cfg.qualidade_3d, "dispositivo": cfg.dispositivo_3d,
                          "motor": cfg.motor_3d, "orcamento_min": cfg.orcamento_3d_min}, "tempos": etapas.tempos, "comando": comando,
-            "video": str(destino), "video_mb": destino.stat().st_size / 1e6 if destino.is_file() else 0,
+            "revisao": _resumo_revisao(cfg), "video": str(destino), "video_mb": destino.stat().st_size / 1e6 if destino.is_file() else 0,
             "duracao_video_s": min(tl.duracao_video, cfg.limite_segundos or tl.duracao_video),
             "srt": str(srt), "n_legendas": len(legendas), "timeline_json": str(pasta_tl / "linha-do-tempo.json"), "log": str(arquivo_log),
         }

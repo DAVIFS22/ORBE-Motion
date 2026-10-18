@@ -1,0 +1,12 @@
+{
+  "_nota": "Fonte única de andamento (BPM) e nível de cada clima musical, lida pelo JavaScript (partitura) e pelo Python (grade de batidas planejada). Compasso 4/4 em todos.",
+  "misterio":     { "bpm": 60, "nivel_db": 0.0 },
+  "civilizacoes": { "bpm": 66, "nivel_db": -1.0 },
+  "identidade":   { "bpm": 72, "nivel_db": -1.0 },
+  "contemplativa":{ "bpm": 60, "nivel_db": -3.0 },
+  "morte":        { "bpm": 54, "nivel_db": -2.0 },
+  "crucificacao": { "bpm": 60, "nivel_db": -3.0 },
+  "ressurreicao": { "bpm": 84, "nivel_db": 0.0 },
+  "comparacao":   { "bpm": 78, "nivel_db": -1.0 },
+  "encerramento": { "bpm": 66, "nivel_db": -3.0 }
+}

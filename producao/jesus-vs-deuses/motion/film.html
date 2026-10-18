@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Cena de motion</title>
+<style>
+  /* Somente @font-face e layout estático. Não há transition/animation CSS: todo movimento vem de window.seek(t). */
+  @font-face { font-family: "Cinzel"; font-weight: 600; src: url("fonts/cinzel-latin-600-normal.woff2") format("woff2"); }
+  @font-face { font-family: "Cinzel"; font-weight: 700; src: url("fonts/cinzel-latin-700-normal.woff2") format("woff2"); }
+  @font-face { font-family: "Inter"; font-weight: 400; src: url("fonts/inter-latin-400-normal.woff2") format("woff2"); }
+  @font-face { font-family: "Inter"; font-weight: 500; src: url("fonts/inter-latin-500-normal.woff2") format("woff2"); }
+  @font-face { font-family: "Inter"; font-weight: 600; src: url("fonts/inter-latin-600-normal.woff2") format("woff2"); }
+  html, body { margin: 0; padding: 0; background: #07080c; overflow: hidden; }
+  #stage { position: relative; width: 1920px; height: 1080px; overflow: hidden; background: #07080c; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<script type="importmap">{"imports":{"three":"/vendor/three/three.module.js","three/addons/":"/vendor/three-addons/","gsap":"/vendor/gsap/index.js"}}</script>
+<script type="module" src="engine/core.js"></script>
+</body>
+</html>

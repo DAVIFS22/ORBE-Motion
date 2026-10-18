@@ -82,6 +82,91 @@ def _secao_3d(ctx: dict, add):
     add("")
 
 
+def _secao_motion(ctx: dict, add):
+    """Motion graphics (fichas, mapas e linhas do tempo animados): o que foi gerado e o que cada ficha afirma."""
+    ped = ctx.get("cenas_motion") or []
+    add("## Motion graphics (informações animadas)")
+    add("")
+    if not ped:
+        add("Nenhuma composição de motion nesta execução (" + ("Node/Chromium disponíveis, sem cenas elegíveis" if ctx.get("motion") else
+            "Node.js 18+ com 'npm install' em motion/ não disponível") + ").")
+        add("")
+        return
+    usados = [p for p in ped if p["status"] in ("renderizado", "reaproveitado")]
+    seg = sum(p["dur_visivel"] for p in usados)
+    total = ctx.get("duracao_video_s") or 1
+    add(f"- {len(usados)} de {len(ped)} composição(ões) usadas, {seg:.0f} s = {seg / total * 100:.1f}% do vídeo; renderizadas por `window.seek(t)` "
+        "(função pura do tempo; mesmos quadros em qualquer ordem), H.264 yuv420p, CRF 16.")
+    add("- Cada ficha classifica a informação (fato histórico, tradição mitológica, datação acadêmica, crença religiosa ou fonte antiga). "
+        "Datas escritas sem consulta online devem ser conferidas antes da publicação.")
+    add("- Ilustrações fornecidas pelo usuário aparecem como ilustrações modernas de origem/licença não verificadas, nunca como arte da antiguidade.")
+    add("")
+    add("| Plano | Composição | Conteúdo | Duração | Situação |")
+    add("|---|---|---|---|---|")
+    for p in sorted(ped, key=lambda x: x["plano_id"]):
+        add(f"| `{p['plano_id']}` | {p['comp']} | {p['conteudo']} | {p['dur_visivel']:.1f} s | {p['status']}{(' (' + p['detalhe'] + ')') if p.get('detalhe') else ''} |")
+    add("")
+
+
+def _secao_threejs(ctx: dict, add):
+    """Cenas 3D feitas por código em Three.js/WebGL: o que são, o que não são e como foram conferidas."""
+    ped = [p for p in (ctx.get("cenas_motion") or []) if str(p.get("comp", "")).startswith("cena3d_")]
+    if not ped:
+        return
+    usados = [p for p in ped if p["status"] in ("renderizado", "reaproveitado")]
+    add("## Cenas 3D por código (Three.js / WebGL)")
+    add("")
+    add(f"- {len(usados)} de {len(ped)} cena(s) 3D usadas: geometria real (sólidos de revolução, extrusões, terreno por altura), texturas PBR "
+        "procedurais (cor, normal e rugosidade geradas por código com semente fixa), luz solar com sombras, céu e iluminação por imagem, "
+        "feixes de luz e poeira, câmera em spline (Catmull-Rom) e tremor de mão determinístico. Renderizadas por `window.seek(t)` em WebGL por software (SwiftShader).")
+    add("- **São reconstruções artísticas, não evidência arqueológica**: tipos de arquitetura documentados (salão hipostilo, templo dórico, aldeia de pedra) "
+        "combinados por código; inscrições e cores egípcias são estilizadas (não são hieróglifos legíveis), o templo grego não tem policromia nem esculturas, "
+        "a paisagem nórdica não é um local real e a aldeia não representa um sítio específico nem pessoas. Cada cena traz esse aviso na tela.")
+    add("- Nenhum modelo, textura ou foto externa foi usado nestas cenas (nada a licenciar além das bibliotecas listadas no fim). As cenas Blender continuam disponíveis como alternativa.")
+    add("")
+    add("| Plano | Cena | Duração | Situação |")
+    add("|---|---|---|---|")
+    for p in sorted(ped, key=lambda x: x["plano_id"]):
+        add(f"| `{p['plano_id']}` | {p['comp']} | {p['dur_visivel']:.1f} s | {p['status']} |")
+    add("")
+
+
+def _secao_batidas(ctx: dict, add):
+    b = ctx.get("beats")
+    if not b:
+        return
+    add("### Trilha sintetizada e grade de batidas")
+    add("")
+    add(f"- Trilha e efeitos gerados por código com a **Web Audio API** (`OfflineAudioContext`: osciladores, filtros, envelopes ADSR, ruído, convolução simples), "
+        "exportados em WAV PCM; nenhum arquivo ou amostra de áudio de terceiros. Obra própria; não imita gravações acústicas.")
+    add(f"- `beats.json` ({b['planejadas']} batidas planejadas): andamento por seção definido na composição; cortes, revelações e impactos são alinhados a essa grade.")
+    for s in b["secoes"]:
+        m = s.get("medicao") or {}
+        if m.get("mensuravel"):
+            add(f"    - {s['id']} ({s['clima']}, {s['bpm']:g} BPM): {m['pulsos_planejados']} pulsos planejados, {m['cobertura_pulsos'] * 100:.0f}% detectados no áudio "
+                f"(desvio médio {m['desvio_medio_ms']} ms, máx. {m['desvio_abs_max_ms']} ms; andamento medido {m['bpm_medido']} BPM) → "
+                f"{'grade confirmada' if m.get('confirmada') else 'grade NÃO confirmada'}.")
+        else:
+            add(f"    - {s['id']} ({s['clima']}, {s['bpm']:g} BPM): grade planejada (exata por construção); poucos pulsos percussivos para confirmar por onsets.")
+    add("")
+
+
+def _secao_tecnologias(ctx: dict, add):
+    add("## Tecnologias, integração Frame Motion e licenças do código")
+    add("")
+    add("- **Frame Motion (MCP):** o conector aparecia instalado e autenticado, mas desabilitado na conversa e **sem ferramentas expostas**; por isso **não foi usado** e nada "
+        "foi inventado sobre ele. O motor próprio (`motion/`) segue o mesmo contrato determinístico (`window.seek(t)`, sem CSS transitions/timers/rAF/Math.random, "
+        "`mulberry32` com semente fixa, saída H.264 yuv420p CRF 16 a 1920×1080, `node render.mjs`). Se o conector for habilitado, as composições podem ser portadas a ele.")
+    add("- Bibliotecas fixadas em `motion/package.json`: Three.js 0.170.0 (MIT), GSAP 3.12.5 (licença padrão GreenSock, gratuita), Playwright/Chromium (Apache-2.0), "
+        "fontes Cinzel e Inter (SIL OFL 1.1), mapas Natural Earth (domínio público).")
+    add("- Texturas, geometrias, trilha e efeitos são gerados por código (obra própria). Ilustrações dos deuses fornecidas pelo usuário têm origem e licença não verificadas "
+        "(a de Odin traz a assinatura de Talita Babiresti) e aparecem rotuladas como ilustrações modernas.")
+    rev = ctx.get("revisao")
+    if rev:
+        add(f"- Revisão antes da renderização final: {rev}")
+    add("")
+
+
 def gerar(ctx: dict, pasta: Path) -> Path:
     pasta.mkdir(parents=True, exist_ok=True)
     assets = ctx["assets"]
@@ -132,12 +217,14 @@ def gerar(ctx: dict, pasta: Path) -> Path:
     add("## Linha do tempo")
     add("")
     add(f"- {tl['cenas']} cenas, {tl['planos']} planos: {tl['planos_com_imagem']} com imagem baixada e licenciada, "
-        f"{tl.get('planos_video', 0)} com filmagem licenciada, {tl.get('planos_3d', 0)} com animação 3D (Blender) e "
+        f"{tl.get('planos_video', 0)} com filmagem licenciada, {tl.get('planos_3d', 0)} com animação 3D (Blender), {tl.get('planos_motion', 0)} com motion graphics e "
         f"{tl['planos_gerados']} com cenário 2D gerado por código (alternativa quando não há imagem).")
     for a in ctx.get("avisos", []):
         add(f"- Aviso: {a}")
     add("")
     _secao_3d(ctx, add)
+    _secao_motion(ctx, add)
+    _secao_threejs(ctx, add)
     add("## Imagens e licenças")
     add("")
     cont = Counter(a["fonte"] for a in assets)
@@ -177,6 +264,7 @@ def gerar(ctx: dict, pasta: Path) -> Path:
     add("- Todos os sons desta versão são ambientação sintetizada por código ou arquivos fornecidos pelo usuário; "
         "nenhum é apresentado como gravação histórica nem como som do acontecimento bíblico.")
     add("")
+    _secao_batidas(ctx, add)
     add("## Renderização")
     add("")
     r = ctx.get("render") or {}
@@ -190,6 +278,7 @@ def gerar(ctx: dict, pasta: Path) -> Path:
     add("- Paralaxe 2.5D de fotos reais: disponível como cena 3D de prioridade 3 (`--prioridade-3d 3`); só se aplica a fotos baixadas. "
         "Detecção de rostos usa OpenCV se instalado, senão um mapa de saliência.")
     add("")
+    _secao_tecnologias(ctx, add)
     add("## Verificações")
     add("")
     for i in qc.get("itens", []):

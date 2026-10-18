@@ -12,6 +12,8 @@ set "NARRACAO=%NARRACAO:"=%"
 
 where ffmpeg >nul 2>nul || (echo FFmpeg nao encontrado no PATH. Instale em https://ffmpeg.org e tente de novo. & goto fim)
 where python >nul 2>nul || (echo Python nao encontrado no PATH. & goto fim)
+where node >nul 2>nul || (echo Aviso: Node.js nao encontrado - sem motion graphics, cenas Three.js e trilha Web Audio. Instale em https://nodejs.org)
+if exist "motion\package.json" if not exist "motion\node_modules" (echo Instalando as dependencias do motion ^(uma vez^)... & pushd motion & call npm install & call npx playwright install chromium & popd)
 
 rem Qualidade 3D: teste ^| previa ^| padrao ^| alta  (padrao = 1280x720; alta = 1920x1080, bem mais lento)
 if "%QUALIDADE_3D%"=="" set "QUALIDADE_3D=padrao"
@@ -23,6 +25,7 @@ python -m motor_video produzir ^
   --roteiro "entrada\prompt_narracao_e_producao_jesus.txt" ^
   --transcricao "entrada\lv_0_20261017144122.vtt" ^
   --saida "saida\producao" ^
+  --imagens "entrada\imagens-fornecidas" ^
   --prioridade-3d 2 --qualidade-3d %QUALIDADE_3D% --orcamento-3d %ORCAMENTO_3D% ^
   %2 %3 %4 %5 %6 %7 %8 %9
 

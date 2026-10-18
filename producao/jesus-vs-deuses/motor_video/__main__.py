@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shlex
 import sys
@@ -30,7 +31,7 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--imagens", help="Pasta com imagens próprias nomeadas com o id da cena (ex.: c05-nazare_1.jpg).")
     p.add_argument("--storyboard", help="Storyboard alternativo em JSON.")
     p.add_argument("--fps", type=int, default=30, choices=[24, 30])
-    p.add_argument("--crf", type=int, default=19, help="Qualidade x264 (menor = melhor; padrão 19).")
+    p.add_argument("--crf", type=int, default=16, help="Qualidade x264 (menor = melhor; padrão 16).")
     p.add_argument("--preset", default="fast", help="Preset do x264 (ultrafast...veryslow; padrão fast).")
     p.add_argument("--encoder", default="auto", choices=["auto", "cpu", "gpu"],
                    help="auto/cpu: libx264 (estável). gpu: tenta NVENC/QSV/AMF/VideoToolbox e volta à CPU se falhar.")
@@ -57,6 +58,21 @@ def _parser() -> argparse.ArgumentParser:
     g3.add_argument("--listar-3d", action="store_true", help="Mostra o plano das cenas 3D com estimativas de tempo e para.")
     g3.add_argument("--so-3d", action="store_true", help="Renderiza apenas as cenas 3D (cache reaproveitado depois) e para.")
 
+    gm = p.add_argument_group("motion graphics (Node + Chromium), fichas/mapas/linhas do tempo animados")
+    gm.add_argument("--sem-motion", action="store_true", help="Não usa as cenas de motion graphics.")
+    gm.add_argument("--so-motion", action="store_true", help="Renderiza apenas os clipes de motion (cache reaproveitado depois) e para.")
+    gm.add_argument("--motion-trabalhadores", type=int, default=3, help="Páginas do Chromium em paralelo (padrão 3).")
+    gm.add_argument("--audio-numpy", action="store_true", help="Usa a síntese NumPy anterior em vez da Web Audio API (trilha/efeitos).")
+    gm.add_argument("--motion-previa", action="store_true", help="Clipes de motion em 960x540 (revisão rápida; não use no vídeo final).")
+
+    gr = p.add_argument_group("revisão antes da renderização final")
+    gr.add_argument("--so-revisao", type=int, metavar="RODADA", help="Gera as folhas de contato (um quadro por batida relevante) da rodada N e para antes de renderizar o vídeo.")
+
+    av = sub.add_parser("avaliar", help="Registra a avaliação (notas 1–10, três piores problemas, evidências) de uma rodada de revisão.")
+    av.add_argument("--saida", required=True, help="Pasta do projeto.")
+    av.add_argument("--rodada", type=int, required=True)
+    av.add_argument("--arquivo", required=True, help="JSON com notas, justificativas, piores_problemas, evidencias e correcoes_aplicadas.")
+
     g = sub.add_parser("narracao-guia", help="Gera uma narração-guia SINTÉTICA (ruído) a partir do VTT, só para testes.")
     g.add_argument("--transcricao", required=True)
     g.add_argument("--saida", required=True)
@@ -80,6 +96,16 @@ def main(argv: list[str] | None = None) -> int:
             destino = narracao_guia.gerar(cues, dur, Path(args.saida))
             print(f"Narração-guia sintética (NÃO é narração) gravada em {destino} ({dur:.1f}s)")
             return 0
+        if args.comando == "avaliar":
+            from . import revisao
+            pasta = Path(os.path.abspath(args.saida)) / "09-revisao"
+            rod = pasta / f"rodada-{args.rodada:02d}"
+            dados = json.loads(Path(args.arquivo).read_text(encoding="utf-8"))
+            aval = revisao.registrar_avaliacao(rod, dados["notas"], dados["justificativas"], dados.get("piores_problemas", []), dados["evidencias"],
+                                               dados.get("correcoes_aplicadas"))
+            (pasta / "AVALIACAO.md").write_text(revisao.resumo_markdown(pasta), encoding="utf-8")
+            print(f"Rodada {args.rodada}: nota mínima {aval['minimo']} -> {'APROVADA' if aval['aprovado'] else 'reprovada (corrija e gere nova rodada)'}")
+            return 0 if aval["aprovado"] else 2
         if args.comando == "storyboard":
             from . import script_analyzer as sa, storyboard as sb, timeline_builder as tb
             texto = sa.extrair_narracao(Path(args.roteiro).read_text(encoding="utf-8"))
@@ -110,7 +136,11 @@ def main(argv: list[str] | None = None) -> int:
             prioridade_3d=args.prioridade_3d, qualidade_3d=args.qualidade_3d, orcamento_3d_min=args.orcamento_3d,
             dispositivo_3d=args.dispositivo_3d, motor_3d={"cycles": "CYCLES", "eevee": "BLENDER_EEVEE"}[args.motor_3d],
             blender=_caminho(args.blender), listar_3d=args.listar_3d, so_3d=args.so_3d,
+            motion=not args.sem_motion, so_motion=args.so_motion, audio_web=not args.audio_numpy, motion_trabalhadores=max(1, args.motion_trabalhadores),
         )
+        cfg.revisao_rodada = args.so_revisao
+        if args.motion_previa:
+            cfg.motion_largura, cfg.motion_altura = 960, 540
         if args.trabalhadores:
             cfg.trabalhadores = max(1, args.trabalhadores)
         comando = "python -m motor_video " + " ".join(shlex.quote(a) for a in (argv if argv is not None else sys.argv[1:]))

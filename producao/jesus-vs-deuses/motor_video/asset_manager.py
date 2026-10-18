@@ -83,7 +83,7 @@ def sha256_bytes(caminho: Path) -> str:
     return h.hexdigest()
 
 
-def abrir_e_validar(caminho: Path, min_largura: int = MIN_LARGURA_PADRAO) -> Image.Image:
+def abrir_e_validar(caminho: Path, min_largura: int = MIN_LARGURA_PADRAO, min_menor: int = 600) -> Image.Image:
     """Abre a imagem por completo; levanta ImagemInvalida se algo estiver errado."""
     try:
         with Image.open(caminho) as probe:
@@ -94,7 +94,7 @@ def abrir_e_validar(caminho: Path, min_largura: int = MIN_LARGURA_PADRAO) -> Ima
         raise ImagemInvalida(f"arquivo não abre como imagem ({e.__class__.__name__}: {e})") from e
     img = ImageOps.exif_transpose(img)
     w, h = img.size
-    if max(w, h) < min_largura or min(w, h) < 600:
+    if max(w, h) < min_largura or min(w, h) < min_menor:
         raise ImagemInvalida(f"resolução baixa demais ({w}x{h})")
     proporcao = w / h
     if proporcao > 4.0 or proporcao < 0.5:
@@ -249,9 +249,15 @@ class GerenciadorAssets:
         self.salvar()
         return asset
 
-    def importar_local(self, caminho: Path, cena: str) -> Asset:
-        """Imagem fornecida pelo usuário (a licença é responsabilidade dele)."""
-        img = abrir_e_validar(caminho, 900)
+    def importar_local(self, caminho: Path, cena: str, procedencia: dict | None = None) -> Asset:
+        """Imagem fornecida pelo usuário (a licença é responsabilidade dele).
+
+        `procedencia` (opcional, do arquivo procedencia.json ao lado das imagens): titulo, autor, licenca, natureza, aviso.
+        Imagens pequenas são aceitas (a partir de 240 px) com aviso: serão ampliadas e podem ficar suaves.
+        """
+        img = abrir_e_validar(caminho, 240, 200)
+        if max(img.size) < 900:
+            log().warning("Imagem local %s é pequena (%dx%d): será ampliada e pode ficar suave.", caminho.name, *img.size)
         sha = sha256_bytes(caminho)
         ph = dhash(img)
         aid = sha[:12]
@@ -259,13 +265,15 @@ class GerenciadorAssets:
             if cena not in self.assets[aid].cenas:
                 self.assets[aid].cenas.append(cena)
             return self.assets[aid]
+        pr = procedencia or {}
         trabalho = self.dir_trab / f"{aid}.jpg"
         normalizar_para_trabalho(img).save(trabalho, "JPEG", quality=93, subsampling=0)
         asset = Asset(
             id=aid, arquivo_original=str(caminho), arquivo_trabalho=str(trabalho.relative_to(self.pasta)),
-            fonte="usuario", titulo=caminho.stem, autor="não informado", licenca="fornecida pelo usuário",
+            fonte="usuario", titulo=pr.get("titulo", caminho.stem), autor=pr.get("autor", "não informado"),
+            licenca=pr.get("licenca", "fornecida pelo usuário"),
             licenca_categoria="usuario", licenca_url="", url_pagina="", url_arquivo=str(caminho),
-            natureza="imagem fornecida pelo usuário", largura=img.size[0], altura=img.size[1],
+            natureza=pr.get("natureza", "imagem fornecida pelo usuário"), largura=img.size[0], altura=img.size[1],
             sha256=sha, phash=ph, consulta="(local)", cenas=[cena],
         )
         self.assets[aid] = asset

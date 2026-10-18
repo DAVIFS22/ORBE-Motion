@@ -31,7 +31,7 @@ class Config:
     largura: int = 1920
     altura: int = 1080
     fps: int = 30
-    crf: int = 19
+    crf: int = 16
     preset: str = "fast"
     encoder: str = "auto"  # auto | cpu | gpu
     trabalhadores: int = max(1, (os.cpu_count() or 2) - 1)
@@ -58,6 +58,16 @@ class Config:
     blender: Path | None = None     # executável do Blender ou Python com o módulo bpy
     so_3d: bool = False             # renderiza apenas as cenas 3D e para
     listar_3d: bool = False         # mostra o plano 3D (com estimativas) e para
+    # motion graphics (Node + Chromium; composições determinísticas window.seek(t))
+    motion: bool = True             # usa as cenas de motion quando Node/Chromium estiverem disponíveis
+    motion_largura: int = 1920
+    motion_altura: int = 1080
+    motion_crf: int = 16
+    motion_preset: str = "medium"
+    motion_trabalhadores: int = 3
+    so_motion: bool = False         # renderiza apenas os clipes de motion e para
+    revisao_rodada: int | None = None   # gera as folhas de contato por batida da rodada N (09-revisao/) e para antes da renderização
+    audio_web: bool = True          # trilha e efeitos com a Web Audio API (OfflineAudioContext); False = síntese NumPy anterior
 
     def para_dict(self) -> dict:
         d = asdict(self)
