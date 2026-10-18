@@ -1,8 +1,13 @@
 // API da página de áudio: renderiza seções musicais (música + ambiência) e janelas de efeitos com OfflineAudioContext.
 // Os resultados ficam na página e são lidos em blocos (base64) pelo Node. Nenhum arquivo de áudio externo é usado.
-import { SR, criarBarramento, dbLin } from './sintese.js';
-import { tocarSecao } from './partitura.js';
-import { ALVOS_PICO, tocarEvento, AMBIENCIAS, OFFSET_AMB } from './efeitos.js';
+import { SR, criarBarramento, criarMestre, dbLin } from './sintese.js';
+import { tocarSecao, definirComposicao } from './partitura.js';
+import { ALVOS_PICO, PERFIS, tocarEvento, AMBIENCIAS, OFFSET_AMB } from './efeitos.js';
+
+// A composição (tonalidade, progressões, motivos, movimentos, intensidades) vem do JSON: mesma fonte lida pelo Python para o relatório.
+const COMPOSICAO = await (await fetch('/audio/composicao.json')).json();
+definirComposicao(COMPOSICAO);
+window.COMPOSICAO = COMPOSICAO; window.PERFIS = PERFIS; window.ALVOS_PICO = ALVOS_PICO;
 
 const resultados = new Map();
 
@@ -35,21 +40,22 @@ window.renderSecao = async function (spec) {
   const env = ctx.createGain(); env.connect(mus);
   env.gain.setValueAtTime(0.0001, primeira ? 0 : inicioCtx - xf); env.gain.linearRampToValueAtTime(1, inicioCtx + (primeira ? 3 : xf));
   env.gain.setValueAtTime(1, inicioCtx + durSec - xf); env.gain.linearRampToValueAtTime(0.0001, inicioCtx + durSec + xf);
-  const busM = criarBarramento(ctx, env, { decaimento: 4.2, wet: 0.55, semente: semente + 1, brilho: 0.45 });
-  const info = tocarSecao(ctx, busM, clima, bpm, inicioCtx, durSec, semente, spec.camadas ?? null);
+  const busM = criarMestre(ctx, env, { decaimento: 4.2, wet: 0.55, semente: semente + 1, brilho: 0.45 });     // famílias: graves, harmonia, melodia, percussão, efeitos
+  const info = tocarSecao(ctx, busM, clima, bpm, inicioCtx, durSec, semente, spec.camadas ?? null, { ocorrencia: spec.ocorrencia ?? 0, fimFilme: !!spec.fimFilme });
   const envA = ctx.createGain(); envA.connect(amb);
   envA.gain.setValueAtTime(0.0001, primeira ? 0 : inicioCtx - xf); envA.gain.linearRampToValueAtTime(1, inicioCtx + (primeira ? 2.5 : xf));
   envA.gain.setValueAtTime(1, inicioCtx + durSec - xf); envA.gain.linearRampToValueAtTime(0.0001, inicioCtx + durSec + xf);
-  const busA = criarBarramento(ctx, envA, { decaimento: 5.5, wet: 0.5, semente: semente + 2, brilho: 0.3 });
+  const hpA = ctx.createBiquadFilter(); hpA.type = 'highpass'; hpA.frequency.value = 45; hpA.Q.value = 0.7; hpA.connect(envA);   // ambiências sem subgrave inaudível
+  const busA = criarBarramento(ctx, hpA, { decaimento: 5.5, wet: 0.5, semente: semente + 2, brilho: 0.3 });
   let offs = 0, k = 0;
   for (const nome of ambiencias) { const f = AMBIENCIAS[nome]; if (!f) throw new Error('ambiência desconhecida: ' + nome); f(ctx, busA, inicioCtx - (primeira ? 0 : xf), durSec + (primeira ? 0 : xf) + xf, semente + 10 * (++k)); offs += OFFSET_AMB[nome] ?? 0; }
   if (ambiencias.length) offs /= ambiencias.length;
   const buf = await ctx.startRendering();
   const canais = [0, 1, 2, 3].map((i) => buf.getChannelData(i));
-  // nível: RMS do corpo da seção (sem as fusões) = ref - 17 + nível do clima (música) e ref - 27 + deslocamento (ambiência)
+  // nível: RMS do corpo da seção (sem as fusões) = ref - 19,5 + nível do clima (música) e ref - 29 + deslocamento (ambiência); ref = fala local
   const c0 = Math.floor((inicioCtx + xf) * SR), c1 = Math.floor((inicioCtx + durSec - xf) * SR);
   const corpo0 = c1 > c0 + SR ? c0 : 0, corpo1 = c1 > c0 + SR ? c1 : canais[0].length;
-  const alvoM = dbLin(ref - 17 + nivelDb), alvoA = dbLin(ref - 27 + offs);
+  const alvoM = dbLin(ref - 19.5 + nivelDb), alvoA = dbLin(ref - 29 + offs);
   const rm = rms([canais[0], canais[1]], corpo0, corpo1), ra = ambiencias.length ? rms([canais[2], canais[3]], corpo0, corpo1) : 0;
   const gM = spec.bruto ? 1 : (rm > 1e-9 ? alvoM / rm : 0), gA = spec.bruto ? 1 : (ra > 1e-9 ? alvoA / ra : 0);   // bruto: calibração de camadas
   for (let i = 0; i < canais[0].length; i++) { canais[0][i] *= gM; canais[1][i] *= gM; canais[2][i] *= gA; canais[3][i] *= gA; }

@@ -402,6 +402,10 @@ CLIMAS = {
                          troca=14, timbre="pad", brilho=1.0, vibrato=0.0, nivel_db=-3.0),
 }
 
+# Alternativa NumPy (sem Node): as variações regionais usam a progressão-base das civilizações.
+for _k in ("civ_egito", "civ_grecia", "civ_nordico"):
+    CLIMAS[_k] = CLIMAS["civilizacoes"]
+
 
 def segmento_musica(clima: str, indice: int, dur: float, semente: int = 1) -> np.ndarray:
     """Segmento de `dur` s do acorde `indice` da progressão do clima (RMS ~0.1)."""

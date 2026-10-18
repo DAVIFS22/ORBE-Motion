@@ -2,35 +2,30 @@
 // Renderiza a trilha e os efeitos sintetizados (Web Audio / OfflineAudioContext) e grava WAV PCM por trecho.
 //   node audio.mjs --spec audio-spec.json
 // spec: { saida, ref, xf, cauda, janela, secoes:[{id,clima,bpm,ini,fim,nivelDb,ambiencias,primeira}], eventos:[{t,tipo,variante,dur}], total }
-// Saída: <saida>/manifesto-audio.json + sec-NN-musica.wav, sec-NN-amb.wav, sfx-NN.wav (float32, 48 kHz, estéreo).
+// Saída: <saida>/manifesto-audio.json + sec-NN-musica.wav, sec-NN-amb.wav, sfx-NN.wav (PCM 24 bits com dither TPDF determinístico, 48 kHz, estéreo; codificação própria em audio/wav.mjs).
 import { chromium } from 'playwright-core';
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { criarEscritorWav, lerCabecalhoWav } from './audio/wav.mjs';
 import { servidor } from './render.mjs';
 
 const BLOCO = 1 << 20;
 
-function gravarWav(arquivos, n, canais, destino) {   // canais: [Float32 pedaços por canal via leitor]; entrada raw f32le intercalada
-  return new Promise((ok, no) => {
-    const p = spawn('ffmpeg', ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'f32le', '-ar', '48000', '-ac', '2', '-i', 'pipe:0', '-c:a', 'pcm_f32le', destino], { stdio: ['pipe', 'ignore', 'pipe'] });
-    let err = ''; p.stderr.on('data', (d) => { err += d; }); p.on('close', (c) => (c === 0 ? ok() : no(new Error('ffmpeg: ' + err.slice(-300)))));
-    arquivos(p.stdin);
-  });
+// Baixa os blocos Float32 de dois canais do OfflineAudioContext e grava WAV PCM com a codificação própria (audio/wav.mjs).
+async function baixar(page, id, canalL, canalR, n, destino, { bits = 24 } = {}) {
+  const w = criarEscritorWav(destino, { canais: 2, taxa: 48000, bits, float: bits === 32, quadros: n, dither: bits < 32, semente: hashNome(path.basename(destino)) });
+  for (let i = 0; i < n; i += BLOCO) {
+    const m = Math.min(BLOCO, n - i);
+    const [a, b] = await Promise.all([page.evaluate(([id, c, i, m]) => window.lerBloco(id, c, i, m), [id, canalL, i, m]), page.evaluate(([id, c, i, m]) => window.lerBloco(id, c, i, m), [id, canalR, i, m])]);
+    const L = new Float32Array(Buffer.from(a, 'base64').buffer.slice(0)), R = new Float32Array(Buffer.from(b, 'base64').buffer.slice(0));
+    const inter = new Float32Array(m * 2); for (let k = 0; k < m; k++) { inter[2 * k] = L[k]; inter[2 * k + 1] = R[k]; }
+    w.escrever(inter);
+  }
+  w.fechar();
+  const h = lerCabecalhoWav(destino);
+  if (h.quadros !== n || h.taxa !== 48000 || h.canais !== 2) throw new Error(`WAV inválido após a gravação: ${destino}`);
 }
-
-async function baixar(page, id, canalL, canalR, n, destino) {
-  await gravarWav(async (stdin) => {
-    for (let i = 0; i < n; i += BLOCO) {
-      const m = Math.min(BLOCO, n - i);
-      const [a, b] = await Promise.all([page.evaluate(([id, c, i, m]) => window.lerBloco(id, c, i, m), [id, canalL, i, m]), page.evaluate(([id, c, i, m]) => window.lerBloco(id, c, i, m), [id, canalR, i, m])]);
-      const L = new Float32Array(Buffer.from(a, 'base64').buffer.slice(0)), R = new Float32Array(Buffer.from(b, 'base64').buffer.slice(0));
-      const inter = new Float32Array(m * 2); for (let k = 0; k < m; k++) { inter[2 * k] = L[k]; inter[2 * k + 1] = R[k]; }
-      if (!stdin.write(Buffer.from(inter.buffer))) await new Promise((r) => stdin.once('drain', r));
-    }
-    stdin.end();
-  }, n, 2, destino);
-}
+const hashNome = (s) => { let h = 2166136261; for (const c of s) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; };
 
 async function principal() {
   const i = process.argv.indexOf('--spec'); if (i < 0) throw new Error('use --spec arquivo.json');
@@ -42,9 +37,10 @@ async function principal() {
   try {
     const page = await browser.newPage(); page.on('pageerror', (e) => console.log('ERRO página: ' + e));
     await page.goto(`http://127.0.0.1:${srv.address().port}/audio/audio.html`); await page.waitForFunction('window.__audioPronto === true');
+    Object.assign(manifesto, await page.evaluate(() => ({ perfis: window.PERFIS, alvosPico: window.ALVOS_PICO, composicao: window.COMPOSICAO })));
     let k = 0;
     for (const s of spec.secoes) {
-      const r = await page.evaluate((a) => window.renderSecao(a), { ...s, xf: spec.xf ?? 2.5, cauda: spec.cauda ?? 6, ref: spec.ref, semente: 1 + k });
+      const r = await page.evaluate((a) => window.renderSecao(a), { ...s, xf: spec.xf ?? 2.5, cauda: spec.cauda ?? 6, ref: s.ref ?? spec.ref, semente: 1 + k });
       const base = path.join(spec.saida, `sec-${String(k).padStart(2, '0')}`);
       await baixar(page, r.id, 0, 1, r.amostras, base + '-musica.wav');
       if (s.ambiencias?.length) await baixar(page, r.id, 2, 3, r.amostras, base + '-amb.wav');

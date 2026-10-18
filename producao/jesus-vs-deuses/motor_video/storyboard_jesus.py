@@ -14,6 +14,10 @@ from .storyboard import C, CAP, LISTA, PONTO, T3D, TITULO, VERS, Secao
 SECOES = {
     "1-abertura": Secao("1-abertura", "misterio", ["vento_profundo", "ressonancia_templo"], "Mistério das civilizações"),
     "2-civilizacoes": Secao("2-civilizacoes", "civilizacoes", ["ambiencia_templo", "vento_ruinas"], "Civilizações antigas"),
+    # variações da mesma identidade musical (centro em Ré) para os blocos de cada tradição
+    "2b-egito": Secao("2b-egito", "civ_egito", ["ambiencia_templo", "vento_deserto"], "Egito: ordem do cosmos e vida após a morte"),
+    "2c-grecia": Secao("2c-grecia", "civ_grecia", ["vento_suave"], "Grécia: Zeus e os relatos míticos"),
+    "2d-nordicos": Secao("2d-nordicos", "civ_nordico", ["vento_profundo", "grave_sutil"], "Tradições nórdicas: Odin e o Ragnarök"),
     "3-identidade": Secao("3-identidade", "identidade", ["aldeia", "vento_suave"], "Identidade de Jesus"),
     "4-amor": Secao("4-amor", "contemplativa", ["natureza_discreta"], "Amor e serviço"),
     "5-morte": Secao("5-morte", "morte", ["vento_deserto", "grave_atmosferico"], "Morte e esperança"),
@@ -671,7 +675,14 @@ _VIDEOS = {
     "k09-proposito": ["sunrise mountains time-lapse"],
 }
 
+# blocos de cada tradição no capítulo das civilizações (seção musical própria, mesma identidade temática)
+_SECOES_REGIONAIS = {"d02-egito-crencas": "2b-egito", "d03-osiris": "2b-egito", "d04-anubis": "2b-egito", "d05-ra": "2b-egito",
+                     "d06-nao-reduzir": "2b-egito", "d07-sociedades": "2b-egito", "d08-zeus": "2c-grecia", "d09-relatos": "2c-grecia",
+                     "d10-nordicas": "2d-nordicos", "d11-ragnarok": "2d-nordicos"}
+
 for _c in CENAS:
+    if _c.id in _SECOES_REGIONAIS:
+        _c.secao = _SECOES_REGIONAIS[_c.id]
     if _c.id in _VIDEOS:
         _c.videos = _VIDEOS[_c.id]
     if _c.id in _ATRIBUICOES_3D:

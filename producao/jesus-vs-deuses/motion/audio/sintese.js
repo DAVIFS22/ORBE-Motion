@@ -185,11 +185,12 @@ export function sino(ctx, bus, t0, freq, o = {}) {
 
 // Subida de tensão: ruído filtrado que varre para o agudo com crescendo; termina no instante t0 + dur.
 export function riser(ctx, bus, t0, dur, o = {}) {
-  const { f0 = 300, f1 = 5200, ganho = 0.14, wet = 0.4, semente = 3 } = o;
+  const { f0 = 300, f1 = 5200, ganho = 0.14, wet = 0.4, semente = 3, tom = true } = o;
   const r = fonteRuido(ctx, semente, t0, t0 + dur + 0.1, semente), bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 1.4;
   bp.frequency.setValueAtTime(f0, t0); bp.frequency.exponentialRampToValueAtTime(f1, t0 + dur);
   const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(ganho, t0 + dur * 0.92); g.gain.linearRampToValueAtTime(0.0001, t0 + dur + 0.08);
   r.connect(bp); bp.connect(g); lig(g, bus, wet);
+  if (!tom) return;                                       // riser de "ar": sem o tom varrido (fica fora da banda da voz)
   const t = osc(ctx, 'sine', f0 / 2, t0, t0 + dur + 0.1); t.frequency.exponentialRampToValueAtTime(f1 / 6, t0 + dur); const tg = ctx.createGain();
   tg.gain.setValueAtTime(0.0001, t0); tg.gain.exponentialRampToValueAtTime(ganho * 0.4, t0 + dur * 0.92); tg.gain.linearRampToValueAtTime(0.0001, t0 + dur + 0.08); t.connect(tg); lig(tg, bus, wet);
 }
@@ -211,4 +212,76 @@ export function whoosh(ctx, bus, t0, o = {}) {
   const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t0); g.gain.linearRampToValueAtTime(ganho, t0 + dur * 0.45); g.gain.linearRampToValueAtTime(0.0001, t0 + dur);
   const p = ctx.createStereoPanner(); p.pan.setValueAtTime(variante % 2 ? 0.7 : -0.7, t0); p.pan.linearRampToValueAtTime(variante % 2 ? -0.7 : 0.7, t0 + dur);
   r.connect(bp); bp.connect(g); g.connect(p); lig(p, bus, wet);
+}
+
+
+// ------------------------------------------------------------------ barramentos e master ---
+
+// Master com barramentos por família (graves, harmonia, melodia, percussão, efeitos), reverberação compartilhada e cadeia final:
+// passa-altas 24 Hz (sem energia inaudível), compressor de "cola" suave e limitador de segurança. Cada família devolve um barramento
+// do mesmo formato dos instrumentos ({ctx, seco, envio}), então `lig(no, bus, wet)` continua valendo.
+export function criarMestre(ctx, saida, { decaimento = 4.2, wet = 0.55, semente = 1, brilho = 0.45 } = {}) {
+  const entrada = ctx.createGain();
+  const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 24; hp.Q.value = 0.6;
+  const cola = ctx.createDynamicsCompressor(); Object.assign(cola, {}); cola.threshold.value = -22; cola.knee.value = 14; cola.ratio.value = 1.8; cola.attack.value = 0.03; cola.release.value = 0.35;
+  const lim = ctx.createDynamicsCompressor(); lim.threshold.value = -3; lim.knee.value = 0; lim.ratio.value = 20; lim.attack.value = 0.003; lim.release.value = 0.12;
+  entrada.connect(hp); hp.connect(cola); cola.connect(lim); lim.connect(saida);
+  const rev = criarBarramento(ctx, entrada, { decaimento, wet, semente, brilho });
+  const cadeia = (nos, destino) => { for (let i = 0; i < nos.length - 1; i++) nos[i].connect(nos[i + 1]); nos[nos.length - 1].connect(destino); return nos[0]; };
+  const filtro = (tipo, f, q = 0.7, g = 0) => { const b = ctx.createBiquadFilter(); b.type = tipo; b.frequency.value = f; b.Q.value = q; b.gain.value = g; return b; };
+  const comp = (limiar, razao, atq, rel, joelho = 6) => { const c = ctx.createDynamicsCompressor(); c.threshold.value = limiar; c.ratio.value = razao; c.attack.value = atq; c.release.value = rel; c.knee.value = joelho; return c; };
+  const fam = (nos) => ({ ctx, seco: cadeia(nos, entrada), envio: rev.envio });
+  return {
+    ctx, entrada, rev,
+    graves: fam([filtro('highpass', 35, 0.7), comp(-24, 3, 0.012, 0.25)]),                       // controle de subgraves
+    harmonia: fam([filtro('highpass', 38), filtro('peaking', 2800, 0.9, -2.0)]),                 // abre espaço para a voz (2–3 kHz)
+    melodia: fam([filtro('highpass', 110), filtro('peaking', 3000, 0.9, -1.5)]),
+    percussao: fam([filtro('highpass', 28), comp(-18, 2.2, 0.02, 0.2)]),
+    efeitos: fam([filtro('highpass', 60)]),
+  };
+}
+
+// ------------------------------------------------------------ instrumentos adicionais ---
+
+// Tambor de mão (derbake) sintético: "dum" grave, "tak" seco, "ka" leve. Timbre eletrônico, não imita gravação.
+export function darbuka(ctx, bus, t0, o = {}) {
+  const { tipo = 'dum', ganho = 0.4, wet = 0.3 } = o;
+  if (tipo === 'dum') {
+    const x = osc(ctx, 'sine', 170, t0, t0 + 0.4); x.frequency.setValueAtTime(170, t0); x.frequency.exponentialRampToValueAtTime(82, t0 + 0.12);
+    const g = ctx.createGain(); g.gain.setValueAtTime(ganho, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.34); x.connect(g); lig(g, bus, wet);
+    const r = fonteRuido(ctx, 111, t0, t0 + 0.05, 2.1), lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900; const rg = ctx.createGain(); rg.gain.setValueAtTime(ganho * 0.4, t0); rg.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.05); r.connect(lp); lp.connect(rg); lig(rg, bus, wet);
+  } else {
+    const r = fonteRuido(ctx, tipo === 'tak' ? 113 : 114, t0, t0 + 0.12, 3.3), bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = tipo === 'tak' ? 3300 : 2400; bp.Q.value = 1.6;
+    const g = ctx.createGain(); g.gain.setValueAtTime(ganho * (tipo === 'tak' ? 0.8 : 0.45), t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + (tipo === 'tak' ? 0.085 : 0.06)); r.connect(bp); bp.connect(g); lig(g, bus, wet);
+    const x = osc(ctx, 'sine', tipo === 'tak' ? 480 : 380, t0, t0 + 0.1), xg = ctx.createGain(); xg.gain.setValueAtTime(ganho * 0.25, t0); xg.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.07); x.connect(xg); lig(xg, bus, wet);
+  }
+}
+
+// Tambor de quadro grave (batida lenta, tom nórdico): seno que cai + ruído grave com cauda mais longa.
+export function tamborQuadro(ctx, bus, t0, o = {}) {
+  const { ganho = 0.5, wet = 0.5 } = o;
+  const x = osc(ctx, 'sine', 108, t0, t0 + 1.2); x.frequency.setValueAtTime(108, t0); x.frequency.exponentialRampToValueAtTime(58, t0 + 0.2);
+  const g = ctx.createGain(); g.gain.setValueAtTime(ganho, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.9); x.connect(g); lig(g, bus, wet);
+  const r = fonteRuido(ctx, 117, t0, t0 + 0.3, 4.1), lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 520;
+  const rg = ctx.createGain(); rg.gain.setValueAtTime(ganho * 0.5, t0); rg.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22); r.connect(lp); lp.connect(rg); lig(rg, bus, wet);
+}
+
+// "Lira" sintética: dedilhado aditivo curto e brilhante (parciais ímpares), pensado para arpejos modais.
+export function lira(ctx, bus, t0, freq, o = {}) {
+  const { ganho = 0.1, dur = 1.8, wet = 0.4, pan = 0 } = o;
+  const g = ctx.createGain(); g.gain.value = ganho; const p = ctx.createStereoPanner(); p.pan.value = pan; g.connect(p); lig(p, bus, wet);
+  for (const [k, a] of [[1, 1], [2, 0.5], [3, 0.38], [4, 0.2], [5, 0.12]]) {
+    const fk = freq * k; if (fk > 9000) break;
+    const x = osc(ctx, k % 2 ? 'sine' : 'triangle', fk, t0, t0 + dur + 0.1), ga = ctx.createGain();
+    ga.gain.setValueAtTime(0.0001, t0); ga.gain.linearRampToValueAtTime(a, t0 + 0.004); ga.gain.exponentialRampToValueAtTime(0.0001, t0 + dur / (0.7 + 0.5 * k)); x.connect(ga); ga.connect(g);
+  }
+}
+
+// "Trompa" sintética (grave, com abertura de filtro no ataque) para frases nórdicas; não imita um instrumento real.
+export function trompa(ctx, bus, t0, dur, freq, o = {}) {
+  const { ganho = 0.08, wet = 0.5 } = o; const fim = t0 + dur + 0.8;
+  const x = osc(ctx, 'sawtooth', freq, t0, fim, -4), y = osc(ctx, 'sawtooth', freq, t0, fim, 5);
+  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = 1.2; lp.frequency.setValueAtTime(freq * 1.2, t0); lp.frequency.linearRampToValueAtTime(freq * 5.5, t0 + Math.min(0.9, dur * 0.5)); lp.frequency.linearRampToValueAtTime(freq * 2.2, t0 + dur);
+  const v = osc(ctx, 'sine', 4.8, t0, fim), vg = ctx.createGain(); vg.gain.value = 6; v.connect(vg); vg.connect(x.detune); vg.connect(y.detune);
+  const g = ctx.createGain(); adsr(g.gain, t0, 0.35, 0.25, 0.8, 0.6, ganho, dur); x.connect(lp); y.connect(lp); lp.connect(g); lig(g, bus, wet);
 }

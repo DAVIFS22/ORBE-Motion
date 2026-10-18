@@ -14,6 +14,8 @@ from . import asset_manager as am
 from . import blender_bridge as bb
 from . import motion_bridge as mb
 from . import revisao
+from . import audio_qualidade as aq
+from . import audio_graficos as ag
 from . import geodados
 from . import audio_mixer, audio_webaudio as aw, image_research, media_ingestion, procedural_art, project_report, quality_checker
 from . import script_analyzer as sa
@@ -225,11 +227,11 @@ def produzir(cfg: Config, pasta_entrada: Path | None = None, comando: str = "") 
             avisos.append("Blender não encontrado: as cenas 3D foram desativadas e os planos usam imagens/cenários alternativos. "
                           "Instale o Blender (https://www.blender.org) ou 'pip install bpy' e informe --blender, se necessário.")
         cfg3d = {"blender_ok": blender is not None, "prioridade": cfg.prioridade_3d}
-        motion = mb.localizar_motion() if cfg.motion else None
+        motion = mb.localizar_motion() if (cfg.motion or cfg.audio_web) else None   # Node/Chromium: clipes de motion e/ou trilha Web Audio
         if cfg.motion and motion is None:
             avisos.append("Motion graphics desativados: Node.js 18+ com 'npm install' em motion/ e o Chromium do Playwright são necessários. "
                           "As cenas usam imagens/cenários alternativos e o 3D do Blender.")
-        cfgmo = {"ok": motion is not None}
+        cfgmo = {"ok": motion is not None and cfg.motion}
         planejadas = tb.planejar_cenas(al, cenas, duracao_video, cfg.plano_alvo_s, avisos, cfg3d, cfgmo)
         log().info("%d cenas ancoradas no roteiro; %d planos desejados", len(planejadas), sum(c.planos_desejados for c in planejadas))
 
@@ -266,7 +268,7 @@ def produzir(cfg: Config, pasta_entrada: Path | None = None, comando: str = "") 
         etapas.inicio("5c/9 Motion graphics (fichas, mapas e linhas do tempo animados)")
         batidas = [b["t"] for b in grade["batidas"]]
         pedidos_mo = tb.coletar_pedidos_motion(tl, al, cfg.pasta(PASTAS["imagens"]), batidas, cfg.limite_segundos)
-        if motion is not None and pedidos_mo:
+        if motion is not None and cfg.motion and pedidos_mo:
             _cenas_motion(cfg, motion, pedidos_mo, tl, etapas)
         salvar_json(pasta_tl / "linha-do-tempo.json", tl.para_dict())
         salvar_json(pasta_tl / "cenas-motion.json", [asdict(p) for p in pedidos_mo])
@@ -304,8 +306,32 @@ def produzir(cfg: Config, pasta_entrada: Path | None = None, comando: str = "") 
         if stems is None:
             stems = audio_mixer.construir_stems(tl, narr, pasta_audio, entradas.musicas, entradas.efeitos, cfg.limite_segundos)
         mix = pasta_audio / "mix-final-48k24.wav"
+        fundo = pasta_audio / "fundo-sem-voz.wav"
         info_mix = audio_mixer.mixar(entradas.narracao_wav, canais, stems["musica"], stems["efeitos"], dur_mix, narr, mix,
-                                     cfg.loudness_alvo)
+                                     cfg.loudness_alvo, cfg.true_peak, manter_fundo=fundo)
+        # análise de cada faixa (A narração, B música, C efeitos, fundo após ducking, D mixagem) + relatório de loudness e picos
+        narr_an = aq.analisar_narracao(entradas.narracao_wav)
+        faixas = [aq.analisar_faixa(stems["musica"], "música sintetizada (B)", "musica", dur_mix, stems.get("juncoes")),
+                  aq.analisar_faixa(stems["efeitos"], "efeitos e ambiências sintetizados (C)", "efeitos", dur_mix),
+                  aq.analisar_faixa(fundo, "fundo após ducking (B+C)", "fundo", dur_mix),
+                  aq.analisar_faixa(mix, "mixagem final (D)", "mix", dur_mix)]
+        cauda = aq.cauda_final(stems["musica"]) if not cfg.limite_segundos else None
+        rel_audio = aq.relatorio_audio(pasta_audio, narr_an, faixas, info_mix, grade, stems.get("mestre"), cauda)
+        if cfg.so_audio or cfg.revisao_rodada:
+            mestre = stems.get("mestre") or {}
+            ag.formas_de_onda(pasta_audio / "formas-de-onda.png",
+                              [("narração (A)", entradas.narracao_wav), ("música (B)", stems["musica"]), ("efeitos (C)", stems["efeitos"]), ("mix (D)", mix)], dur_mix,
+                              [(e["t"], e["tipo"]) for e in mestre.get("efeitos", [])], [(m["ini"], m["clima"]) for m in mestre.get("musica", [])])
+            ag.espectrograma(pasta_audio / "espectrograma-mix.png", mix, dur_mix)
+        if not cfg.manter_temporarios:
+            fundo.unlink(missing_ok=True)
+        for f in faixas + [narr_an]:
+            if f["problemas"]:
+                log().warning("Áudio – %s: %s", f["nome"], "; ".join(f["problemas"]))
+        if cfg.so_audio:
+            etapas.fim()
+            print(f"Áudio pronto em {pasta_audio}: relatorio-audio.md, formas-de-onda.png, espectrograma-mix.png, linha-do-tempo-audio.json")
+            return 0
 
         if cfg.revisao_rodada:
             etapas.inicio(f"7a/9 Revisão (rodada {cfg.revisao_rodada}): folhas de contato por batida")
@@ -347,7 +373,9 @@ def produzir(cfg: Config, pasta_entrada: Path | None = None, comando: str = "") 
             "cenas_motion": [asdict(p) for p in pedidos_mo], "motion": (f"node {motion.versao_node}" if motion else None),
             "assets": assets, "pendencias": gerenciador.pendencias, "falhas_download": gerenciador.falhas, "rede": estado_rede,
             "beats": {"arquivo": str(pasta_audio / "beats.json"), "planejadas": len(grade["batidas"]), "secoes": grade["secoes"]},
-            "audio": {"motor": "webaudio" if "manifesto" in stems else "numpy", "narracao_rms_db": narr["rms_ativo_db"], "narracao_pico_db": narr["pico_db"], "fontes": stems["fontes"],
+            "relatorio_audio": str(pasta_audio / "relatorio-audio.md"),
+            "audio": {"motor": "webaudio" if "manifesto" in stems else "numpy", "clareza_voz": (info_mix.get("inteligibilidade") or {}).get("razao_db"),
+                      "lufs_final": (info_mix.get("final") or {}).get("lufs"), "tp_final": (info_mix.get("final") or {}).get("true_peak_dbtp"), "narracao_rms_db": narr["rms_ativo_db"], "narracao_pico_db": narr["pico_db"], "fontes": stems["fontes"],
                       "mix_lufs": info_mix["entrada"]["input_i"], "alvo_lufs": info_mix["alvo_lufs"], "true_peak": info_mix["true_peak_max"]},
             "render": stats, "qc": res.para_dict(), "cenas3d": [asdict(p) for p in pedidos],
             "blender": (f"{blender.tipo}: {blender.caminho} (versão {blender.versao})" if blender else None),

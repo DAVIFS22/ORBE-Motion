@@ -1,10 +1,24 @@
 // Efeitos pontuais e ambiências, sintetizados com a Web Audio API. As ambiências são "ambientação sintética" e nunca
 // são apresentadas como gravações históricas nem como o som de acontecimentos bíblicos.
 import { mulberry32, hash32, rngFor } from '../engine/rng.js';
-import { SR, hz, hzMidi, midi, bumbo, taiko, sino, riser, impacto, whoosh, piano, fonteRuido, adsr, sub, lig } from './sintese.js';
+import { SR, hz, hzMidi, midi, bumbo, taiko, sino, riser, impacto, whoosh, piano, pad, fonteRuido, adsr, sub, lig } from './sintese.js';
 
 // Pico-alvo de cada tipo de efeito, em dB relativos ao nível (RMS) da narração.
 export const ALVOS_PICO = { impacto: -4, whoosh: -9, nota: -7, passos: -14, tecido: -20, pergaminho: -16, revelar: -8, ping: -14, faixa: -15, rota: -13 };
+
+// Perfil de cada efeito (metadados da linha do tempo mestre): síntese, envelope, panorâmica e papel narrativo permitido.
+export const PERFIS = {
+  impacto: { sintese: 'seno grave descendente (3,1×f→f, f=36–48 Hz) + sub-seno + ruído passa-baixas 5,2 kHz→260 Hz; subida de ruído de 0,65 s antes', envelope: 'ataque instantâneo; queda 0,7 s (ruído), 1,4 s (golpe), 3 s (sub)', pan: 'centro (golpe) / estéreo difuso (cauda)', papel: 'momento significativo: título, virada narrativa ou revelação marcante (nunca em cada corte)' },
+  whoosh: { sintese: 'ruído filtrado em banda (Q 0,9–1,5) varrendo 250↔4200 Hz', envelope: 'subida até 45% da duração e descida linear (1,0–1,4 s)', pan: 'varredura de ±0,7 entre os lados ao longo do efeito', papel: 'passagem de cena / transição entre seções, sempre subordinada à fala' },
+  nota: { sintese: 'piano aditivo (7 parciais) em Ré5, Fá#5, Lá5 ou Si4 (tonalidade da trilha)', envelope: 'martelo de 40 ms + decaimento por parcial (até 4,2 s)', pan: 'segue a altura (±0,6)', papel: 'ponto de atenção discreto em passagens-chave' },
+  passos: { sintese: 'ruído passa-baixas (380–540 Hz) em rajadas de 120 ms a cada 0,62 s', envelope: 'ataque 12 ms, queda 120 ms', pan: 'aleatório com semente (±0,25)', papel: 'travessia/deslocamento (ambientação sintética, não é gravação)' },
+  tecido: { sintese: 'ruído em banda 900→2400 Hz', envelope: 'subida 0,18 s, descida até 0,6 s', pan: 'centro', papel: 'gesto de pano/roupa em cena' },
+  pergaminho: { sintese: '26 estalos de ruído passa-altas (>2,6 kHz) em 0,9 s', envelope: 'ataque 4 ms, queda 30 ms por estalo', pan: 'centro', papel: 'abertura de manuscrito/rolo' },
+  revelar: { sintese: 'golpe grave suave (74→38 Hz) + sopro em banda 1,4 kHz + acorde de Ré maior suave (D4–F#4–A4)', envelope: 'golpe 1,2 s; sopro 0,45 s; acorde: ataque 0,4 s, liberação 2,2 s', pan: 'centro', papel: 'aparição de nome/ficha/informação importante na tela (mudança harmônica suave + impacto discreto)' },
+  ping: { sintese: 'sino FM metálico (A5/E6/D6)', envelope: 'queda exponencial de 2,6 s', pan: 'centro', papel: 'marcador de local ou data (mapa/linha do tempo)' },
+  faixa: { sintese: 'ruído em banda varrendo para o agudo (0,6 s)', envelope: 'subida/descida em 0,6 s', pan: '±0,7 varredura', papel: 'entrada de faixa/período na linha do tempo' },
+  rota: { sintese: 'seno 330→880 Hz', envelope: 'ADSR 50 ms / 0,3 s / 0,4 s', pan: 'centro', papel: 'traçado de rota no mapa' },
+};
 
 function osc(ctx, tipo, f, t0, t1) { const o = ctx.createOscillator(); o.type = tipo; o.frequency.value = f; o.start(t0); o.stop(t1); return o; }
 
@@ -36,6 +50,7 @@ export function tocarEvento(ctx, bus, tipo, t0, variante = 0, dur = 0) {
     s.connect(hp); hp.connect(g); lig(g, bus, 0.15);
   } else if (tipo === 'revelar') {                                  // nome/ficha entra: golpe grave suave + ar
     bumbo(ctx, bus, t0, { ganho: 0.55, f0: 74, f1: 38, dur: 1.2, wet: 0.45 });
+    pad(ctx, bus, t0 - 0.05, 1.9, [hz('D4'), hz('F#4'), hz('A4')], { onda: 'triangle', brilho: 0.9, ataque: 0.4, libera: 2.2, ganho: 0.045, wet: 0.6, desafina: 4 });   // mudança harmônica suave (Ré maior)
     const s = fonteRuido(ctx, 81 + v, t0 - 0.05, t0 + 0.5, v), bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1400; bp.Q.value = 0.7;
     const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t0 - 0.05); g.gain.linearRampToValueAtTime(0.12, t0 + 0.05); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.45); s.connect(bp); bp.connect(g); lig(g, bus, 0.3);
   } else if (tipo === 'ping') {                                      // local/data marcado no mapa ou na linha do tempo
@@ -103,17 +118,17 @@ function texturaCrescente(ctx, bus, t0, dur, { ganho = 0.4 }) {
 
 // Nome da ambiência -> síntese. `offset` em dB aproxima o equilíbrio relativo usado antes (templo/graves mais presentes).
 export const AMBIENCIAS = {
-  vento_profundo: (c, b, t0, d, s) => { vento(c, b, t0, d, { centro: 260, q: 0.8, rajada: 0.35, ganho: 0.6, semente: s }); drone(c, b, t0, d, 'D1', { ganho: 0.1, quinta: true }); },
+  vento_profundo: (c, b, t0, d, s) => { vento(c, b, t0, d, { centro: 260, q: 0.8, rajada: 0.35, ganho: 0.6, semente: s }); drone(c, b, t0, d, 'D2', { ganho: 0.1, quinta: true }); },
   ressonancia_templo: (c, b, t0, d, s) => { drone(c, b, t0, d, 'D2', { ganho: 0.28, bat: 0.4, quinta: true }); vento(c, b, t0, d, { centro: 420, q: 2.4, rajada: 0.1, ganho: 0.18, semente: s + 1 }); },
-  ambiencia_templo: (c, b, t0, d, s) => { drone(c, b, t0, d, 'A1', { ganho: 0.22, bat: 0.3 }); vento(c, b, t0, d, { centro: 520, q: 1.8, rajada: 0.15, ganho: 0.25, semente: s }); },
+  ambiencia_templo: (c, b, t0, d, s) => { drone(c, b, t0, d, 'A2', { ganho: 0.22, bat: 0.3 }); vento(c, b, t0, d, { centro: 520, q: 1.8, rajada: 0.15, ganho: 0.25, semente: s }); },
   vento_ruinas: (c, b, t0, d, s) => vento(c, b, t0, d, { centro: 720, q: 1.2, rajada: 0.5, ganho: 0.55, chiado: 0.03, semente: s }),
-  aldeia: (c, b, t0, d, s) => { murmurio(c, b, t0, d, { ganho: 0.35, semente: s }); passaros(c, b, t0, d, { densidade: 0.1, ganho: 0.14, semente: s }); },
+  aldeia: (c, b, t0, d, s) => { murmurio(c, b, t0, d, { ganho: 0.09, semente: s }); passaros(c, b, t0, d, { densidade: 0.1, ganho: 0.14, semente: s }); },
   vento_suave: (c, b, t0, d, s) => vento(c, b, t0, d, { centro: 900, q: 0.7, rajada: 0.25, ganho: 0.35, semente: s }),
   natureza_discreta: (c, b, t0, d, s) => { passaros(c, b, t0, d, { densidade: 0.18, ganho: 0.2, semente: s }); vento(c, b, t0, d, { centro: 800, q: 0.7, rajada: 0.2, ganho: 0.2, semente: s + 2 }); },
   vento_deserto: (c, b, t0, d, s) => vento(c, b, t0, d, { centro: 520, q: 0.9, rajada: 0.3, ganho: 0.5, chiado: 0.05, semente: s }),
-  grave_atmosferico: (c, b, t0, d, s) => drone(c, b, t0, d, 'E1', { ganho: 0.45, bat: 0.5, quinta: true }),
+  grave_atmosferico: (c, b, t0, d, s) => drone(c, b, t0, d, 'E2', { ganho: 0.45, bat: 0.5, quinta: true }),
   vento_crescente: (c, b, t0, d, s) => vento(c, b, t0, d, { centro: 640, q: 1.0, rajada: 0.4, ganho: 0.6, chiado: 0.04, semente: s, rampa: [0.3, 1.0] }),
-  grave_sutil: (c, b, t0, d, s) => drone(c, b, t0, d, 'D1', { ganho: 0.3, bat: 0.35 }),
+  grave_sutil: (c, b, t0, d, s) => drone(c, b, t0, d, 'D2', { ganho: 0.3, bat: 0.35 }),
   textura_crescente: (c, b, t0, d, s) => texturaCrescente(c, b, t0, d, { ganho: 0.5 }),
 };
 export const OFFSET_AMB = { ressonancia_templo: 3.0, grave_atmosferico: -3.0, grave_sutil: -3.0, ambiencia_templo: -1.0 };

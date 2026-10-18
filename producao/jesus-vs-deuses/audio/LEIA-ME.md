@@ -53,8 +53,8 @@ O tratamento se adapta à análise e só aplica o que for necessário:
 
 O script gera faixas separadas:
 
-- `02-musica\musica-stem.wav`: a música cai cerca de 10 dB enquanto há fala;
-- `03-efeitos\efeitos-stem.wav`: os efeitos têm ducking leve;
+- `02-musica\musica-sintetizada.wav`: a música cai cerca de 10 dB enquanto há fala;
+- `03-efeitos\efeitos-sintetizados.wav`: os efeitos têm ducking leve;
 - `04-exportacao\mix-final-48k24.wav`: o mix final, em -14 LUFS, o padrão do YouTube, com true peak de no máximo -1 dBTP;
 - `04-exportacao\...-mix-final.mp4`: o vídeo com o mix final.
 

@@ -65,6 +65,10 @@ def _parser() -> argparse.ArgumentParser:
     gm.add_argument("--audio-numpy", action="store_true", help="Usa a síntese NumPy anterior em vez da Web Audio API (trilha/efeitos).")
     gm.add_argument("--motion-previa", action="store_true", help="Clipes de motion em 960x540 (revisão rápida; não use no vídeo final).")
 
+    ga = p.add_argument_group("áudio")
+    ga.add_argument("--so-audio", action="store_true", help="Gera trilha, efeitos, mixagem, relatório de áudio e gráficos (formas de onda, espectrograma) e para. "
+                    "Use com --previa N para uma amostra curta.")
+    ga.add_argument("--true-peak", type=float, default=-1.0, help="Teto de true peak da mixagem em dBTP (padrão -1).")
     gr = p.add_argument_group("revisão antes da renderização final")
     gr.add_argument("--so-revisao", type=int, metavar="RODADA", help="Gera as folhas de contato (um quadro por batida relevante) da rodada N e para antes de renderizar o vídeo.")
 
@@ -139,6 +143,8 @@ def main(argv: list[str] | None = None) -> int:
             motion=not args.sem_motion, so_motion=args.so_motion, audio_web=not args.audio_numpy, motion_trabalhadores=max(1, args.motion_trabalhadores),
         )
         cfg.revisao_rodada = args.so_revisao
+        cfg.so_audio = args.so_audio
+        cfg.true_peak = args.true_peak
         if args.motion_previa:
             cfg.motion_largura, cfg.motion_altura = 960, 540
         if args.trabalhadores:

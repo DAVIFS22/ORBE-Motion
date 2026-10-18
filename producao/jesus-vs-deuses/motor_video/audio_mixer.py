@@ -20,6 +20,7 @@ from pathlib import Path
 import numpy as np
 
 from . import audio_synth as syn
+from . import audio_wav
 from .config import ErroProducao, executar, log, salvar_json
 from .timeline_builder import Timeline
 
@@ -53,7 +54,7 @@ def medir_narracao(wav: Path) -> dict:
     ativo = db > limiar
     rms_ativo = 20 * np.log10(np.sqrt((rms[ativo] ** 2).mean())) if ativo.any() else -40.0
     return {"rms_ativo_db": float(rms_ativo), "pico_db": float(20 * np.log10(np.abs(x).max() + 1e-12)),
-            "atividade": ativo, "duracao_s": len(x) / 16000, "resolucao_hz": 16000 / jan}
+            "atividade": ativo, "rms_quadros_db": db, "duracao_s": len(x) / 16000, "resolucao_hz": 16000 / jan}
 
 
 def loudness(wav: Path, alvo: float = -14.0, tp: float = -1.5) -> dict:
@@ -192,7 +193,7 @@ def pontos_automacao(tl: Timeline, total: float) -> tuple[list[tuple[float, floa
 
 
 def finalizar_stems(tl: Timeline, total: float, limite: float | None, musica, efeitos, raw_m: Path, raw_x: Path,
-                    pontos_m: list, pontos_x: list, pasta_audio: Path, usados: list[dict]) -> dict:
+                    pontos_m: list, pontos_x: list, pasta_audio: Path, usados: list[dict], cadencia_natural: bool = False) -> dict:
     """Automações dos eventos (silêncios, níveis, cauda final), proteção contra clipping e gravação dos stems 24 bits."""
     cm, cx = Curva(total), Curva(total)
     pontos_m = list(pontos_m)
@@ -218,7 +219,8 @@ def finalizar_stems(tl: Timeline, total: float, limite: float | None, musica, ef
     # cauda final: a trilha e os efeitos se retiram com fade-out limpo
     fim_fala = tl.duracao_audio
     if fim_fala < total:
-        cm.somar_local(max(0.0, fim_fala - 1.0), total, 0.0, -45.0, manter=True)
+        if not cadencia_natural:      # com cadência final planejada, a própria tônica decai (release + reverberação): nada de fade forçado na música
+            cm.somar_local(max(0.0, fim_fala - 1.0), total, 0.0, -45.0, manter=True)
         cx.somar_local(max(0.0, fim_fala - 0.5), total, 0.0, -40.0, manter=True)
     elif limite:  # prévia: fade-out curto no corte
         cm.somar_local(total - 1.0, total, 0.0, -30.0, manter=True)
@@ -227,24 +229,23 @@ def finalizar_stems(tl: Timeline, total: float, limite: float | None, musica, ef
     cx.aplicar(efeitos)
 
     saidas = {}
-    for nome, mm, raw in (("musica-stem.wav", musica, raw_m), ("efeitos-stem.wav", efeitos, raw_x)):
+    for nome, mm, raw in (("musica-sintetizada.wav", musica, raw_m), ("efeitos-sintetizados.wav", efeitos, raw_x)):
         pico = float(np.abs(mm[:: 16]).max())
         if pico > 0.98:  # segurança: evita clip no stem
             mm[:] *= 0.95 / pico
         mm.flush()
         destino = pasta_audio / nome
-        executar(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "f32le", "-ar", str(SR), "-ac", "2", "-i", raw,
-                  "-c:a", "pcm_s24le", destino])
+        audio_wav.escrever_wav(destino, mm, SR, 24, True, 11 if nome.startswith("musica") else 13)         # PCM 24 bits com dither TPDF determinístico
         saidas[nome] = destino
         del mm
         raw.unlink(missing_ok=True)
     salvar_json(pasta_audio / "fontes-de-audio.json", usados)
-    return {"musica": saidas["musica-stem.wav"], "efeitos": saidas["efeitos-stem.wav"], "fontes": usados}
+    return {"musica": saidas["musica-sintetizada.wav"], "efeitos": saidas["efeitos-sintetizados.wav"], "fontes": usados}
 
 
 def construir_stems(tl: Timeline, narr: dict, pasta_audio: Path, pasta_musicas: list[Path] | None = None,
                     pasta_efeitos: list[Path] | None = None, limite: float | None = None) -> dict:
-    """Gera `musica-stem.wav` e `efeitos-stem.wav` (24 bits, 48 kHz) e a lista de fontes usadas.
+    """Gera `musica-sintetizada.wav` e `efeitos-sintetizados.wav` (24 bits, 48 kHz) e a lista de fontes usadas.
 
     `limite` (s) restringe os stems ao início da linha do tempo (modo prévia).
     """
@@ -341,28 +342,59 @@ def construir_stems(tl: Timeline, narr: dict, pasta_audio: Path, pasta_musicas: 
 
 # ----------------------------------------------------------- mixagem final ---
 
-def mixar(narracao_wav: Path, canais_narracao: int, stem_musica: Path, stem_efeitos: Path, duracao_video: float,
-          narr: dict, destino: Path, alvo_lufs: float = -14.0, tp: float = -1.5, normalizar: bool = True) -> dict:
-    """Mix final em WAV 24 bits/48 kHz: ducking pela própria narração + ganho linear de loudness.
-
-    Uma única passada pesada (sidechain + soma) grava um intermediário em float; o loudness é medido
-    com `ebur128` e aplicado como ganho linear simples (sem compressão extra), com limitador de pico.
-    """
-    ref = narr["rms_ativo_db"]
-    limiar_m = _db(ref - 9)   # a música abaixa quando a fala passa deste nível
-    limiar_x = _db(ref - 6)
+def _grafo(duracao: float, canais_narracao: int, limiar_m: float, limiar_x: float, db_musica: float, db_efeitos: float) -> str:
+    """Grafo FFmpeg: narração intacta; música com ducking MULTIBANDA (a banda da fala cede mais, graves e agudos menos);
+    efeitos com ducking leve; ambos com passa-altas de proteção. Saídas: [out] = mix completo, [bed] = fundo sem a voz (para medir clareza)."""
     nar = "pan=stereo|c0=c0|c1=c0" if canais_narracao == 1 else "aformat=channel_layouts=stereo"
-    grafo = (
-        f"[0:a]{nar},apad=whole_dur={duracao_video:.3f},asplit=3[n1][n2][n3];"
-        f"[1:a]aformat=channel_layouts=stereo[m];[2:a]aformat=channel_layouts=stereo[x];"
-        f"[m][n1]sidechaincompress=threshold={limiar_m:.5f}:ratio=6:attack=60:release=800:knee=4:makeup=1[md];"
-        f"[x][n2]sidechaincompress=threshold={limiar_x:.5f}:ratio=2.5:attack=15:release=300:knee=4:makeup=1[xd];"
-        f"[n3][md][xd]amix=inputs=3:normalize=0:duration=longest:dropout_transition=0,aresample={SR}[out]"
+    sc = lambda lim, razao, atq, rel, joelho=4: f"threshold={lim:.5f}:ratio={razao}:attack={atq}:release={rel}:knee={joelho}:makeup=1"          # noqa: E731
+    return (
+        f"[0:a]{nar},apad=whole_dur={duracao:.3f},asplit=5[n1][n2][n3][n4][n5];"
+        f"[1:a]aformat=channel_layouts=stereo,highpass=f=28[m0];[m0]acrossover=split=250 3800:order=4th[ml][mm][mh];"
+        f"[ml][n1]sidechaincompress={sc(limiar_m, 2.5, 80, 900)}[mld];"           # graves: cedem pouco (corpo da música)
+        f"[mm][n2]sidechaincompress={sc(limiar_m, 8, 40, 700)}[mmd];"             # banda da fala (250–3800 Hz): cede mais
+        f"[mh][n3]sidechaincompress={sc(limiar_m, 3.5, 40, 700)}[mhd];"           # agudos: cedem pouco
+        f"[mld][mmd][mhd]amix=inputs=3:normalize=0,volume={db_musica:.3f}dB[md];"
+        f"[2:a]aformat=channel_layouts=stereo,highpass=f=40[x0];"
+        f"[x0][n4]sidechaincompress={sc(limiar_x, 4, 15, 400)},volume={db_efeitos:.3f}dB[xd];"
+        f"[md]asplit[md1][md2];[xd]asplit[xd1][xd2];"
+        f"[n5][md1][xd1]amix=inputs=3:normalize=0:duration=longest:dropout_transition=0,aresample={SR}[out];"
+        f"[md2][xd2]amix=inputs=2:normalize=0:duration=longest:dropout_transition=0,aresample={SR}[bed]"
     )
-    entradas = ["-i", narracao_wav, "-i", stem_musica, "-i", stem_efeitos]
+
+
+def mixar(narracao_wav: Path, canais_narracao: int, stem_musica: Path, stem_efeitos: Path, duracao_video: float,
+          narr: dict, destino: Path, alvo_lufs: float = -14.0, tp: float = -1.0, normalizar: bool = True,
+          piso_inteligibilidade_db: float = 14.0, manter_fundo: Path | None = None) -> dict:
+    """Mix final em WAV 24 bits/48 kHz: ducking multibanda pela própria narração + ganho linear de loudness + limitador de pico.
+
+    A narração entra SEM processamento. O loudness é medido (`ebur128`) e aplicado como ganho linear simples (sem compressão
+    extra) — limitado pelo pico quando necessário. Depois mede-se a inteligibilidade da voz (razão voz/fundo na banda da fala): se
+    o 5º percentil ficar abaixo do piso, a música e os efeitos descem o necessário (até 6 dB) e a mixagem é refeita (ajuste adaptativo
+    baseado em medição, não em um valor fixo).
+    """
+    from . import audio_qualidade as aq
+    ref = narr["rms_ativo_db"]
+    limiar_m = _db(ref - 12)          # a música começa a ceder já na fala mais suave
+    limiar_x = _db(ref - 9)
     pre = destino.with_name(destino.stem + "-pre.wav")
-    executar(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *entradas, "-filter_complex", grafo, "-map", "[out]",
-              "-t", f"{duracao_video:.3f}", "-c:a", "pcm_f32le", "-ar", str(SR), pre])
+    bed = manter_fundo or destino.with_name(destino.stem + "-fundo.wav")
+    entradas = ["-i", narracao_wav, "-i", stem_musica, "-i", stem_efeitos]
+
+    def renderizar(db_m: float, db_x: float):
+        executar(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *entradas, "-filter_complex", _grafo(duracao_video, canais_narracao, limiar_m, limiar_x, db_m, db_x),
+                  "-map", "[out]", "-t", f"{duracao_video:.3f}", "-c:a", "pcm_f32le", "-ar", str(SR), pre,
+                  "-map", "[bed]", "-t", f"{duracao_video:.3f}", "-c:a", "pcm_s24le", "-ar", str(SR), bed])
+
+    ajuste = 0.0
+    renderizar(0.0, 0.0)
+    clar = aq.inteligibilidade(narracao_wav, bed, duracao_video, piso_db=piso_inteligibilidade_db)
+    if clar.get("razao_db") and clar["razao_db"]["p5"] < piso_inteligibilidade_db:
+        ajuste = min(6.0, piso_inteligibilidade_db - clar["razao_db"]["p5"] + 0.5)
+        log().info("Clareza da voz abaixo do piso (p5 %.1f dB < %.1f dB): fundo -%.1f dB e nova mixagem.", clar["razao_db"]["p5"], piso_inteligibilidade_db, ajuste)
+        renderizar(-ajuste, -ajuste)
+        clar = aq.inteligibilidade(narracao_wav, bed, duracao_video, piso_db=piso_inteligibilidade_db)
+    clar["ajuste_adaptativo_db"] = -round(ajuste, 2)
+
     proc = executar(["ffmpeg", "-hide_banner", "-nostats", "-i", pre, "-af", "ebur128=peak=true:framelog=quiet", "-f", "null", "-"])
     integ = re.search(r"I:\s+(-?[\d.]+) LUFS", proc.stderr)
     pico = re.search(r"Peak:\s+(-?[\d.]+) dBFS", proc.stderr)
@@ -376,9 +408,19 @@ def mixar(narracao_wav: Path, canais_narracao: int, stem_musica: Path, stem_efei
         aviso = (f"Para respeitar o pico máximo de {tp} dBTP o ganho foi limitado a {ganho_limitado:+.1f} dB "
                  f"(loudness final ≈ {lufs + ganho_limitado:.1f} LUFS, alvo {alvo_lufs}).")
         log().warning(aviso)
-    executar(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", pre, "-af",
-              f"volume={ganho_limitado:.3f}dB,alimiter=limit=0.89:level=false:latency=1", "-c:a", "pcm_s24le", "-ar", str(SR), destino])
+    limite = 10 ** ((tp - 0.15) / 20)                                      # margem de 0,15 dB para o true peak entre amostras
+    for _ in range(3):
+        executar(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", pre, "-af",
+                  f"volume={ganho_limitado:.3f}dB,alimiter=limit={limite:.4f}:attack=3:release=60:level=false:latency=1", "-c:a", "pcm_s24le", "-ar", str(SR), destino])
+        m = aq._ebur128(destino)
+        if m["true_peak_dbtp"] is None or m["true_peak_dbtp"] <= tp + 0.02:
+            break
+        limite *= 10 ** ((tp - m["true_peak_dbtp"] - 0.1) / 20)            # ainda acima do teto: baixa o limite e refaz
     pre.unlink(missing_ok=True)
-    log().info("Mix: %.1f LUFS (pico real %.1f dBTP) -> ganho %+.2f dB -> alvo %.1f LUFS", lufs, tp_real, ganho_limitado, alvo_lufs)
+    if manter_fundo is None:
+        bed.unlink(missing_ok=True)
+    log().info("Mix: %.1f LUFS (pico real %.1f dBTP) -> ganho %+.2f dB -> alvo %.1f LUFS; voz/fundo p5 %s dB",
+               lufs, tp_real, ganho_limitado, alvo_lufs, clar.get("razao_db", {}).get("p5"))
     return {"entrada": {"input_i": f"{lufs:.1f}", "input_tp": f"{tp_real:.1f}"}, "ganho_db": round(ganho_limitado, 2),
-            "alvo_lufs": alvo_lufs, "true_peak_max": tp, "aviso": aviso}
+            "alvo_lufs": alvo_lufs, "true_peak_max": tp, "aviso": aviso, "inteligibilidade": clar, "final": m,
+            "fundo": str(bed) if manter_fundo is not None else None}

@@ -1,9 +1,9 @@
 """Trilha e efeitos sintetizados com a Web Audio API (OfflineAudioContext, em Chromium) + grade de batidas (beats.json).
 
 A música é composta em código (motion/audio/partitura.js): um clima por seção do documentário, com andamento próprio
-(motion/audio/climas.json), progressão harmônica, motivos recorrentes, pulso rítmico e ostinatos. Nenhum arquivo de áudio,
+(motion/audio/composicao.json), progressão harmônica, motivos recorrentes, pulso rítmico e ostinatos. Nenhum arquivo de áudio,
 sample ou gravação é usado. O Node renderiza cada seção em WAV (float32, 48 kHz); aqui os trechos são somados nos stems
-`musica-stem.wav` e `efeitos-stem.wav` (mesmo contrato do `audio_mixer.construir_stems`) e a grade de batidas é
+`musica-sintetizada.wav` e `efeitos-sintetizados.wav` (mesmo contrato do `audio_mixer.construir_stems`) e a grade de batidas é
 planejada a partir da partitura e MEDIDA no áudio renderizado (onsets), nunca suposta.
 """
 
@@ -24,7 +24,8 @@ from .motion_bridge import Motion, PASTA_MOTION
 from .timeline_builder import Timeline
 
 SR = am.SR
-CLIMAS: dict = {k: v for k, v in json.loads((PASTA_MOTION / "audio" / "climas.json").read_text(encoding="utf-8")).items() if not k.startswith("_")}
+COMPOSICAO: dict = json.loads((PASTA_MOTION / "audio" / "composicao.json").read_text(encoding="utf-8"))
+CLIMAS: dict = COMPOSICAO["climas"]
 TIPOS_EFEITO = {"impacto", "whoosh", "nota", "passos", "tecido", "pergaminho", "revelar", "ping", "faixa", "rota"}
 XF, CAUDA = 2.5, 6.0
 
@@ -50,7 +51,7 @@ def grade_planejada(tl: Timeline, total: float | None = None) -> dict:
                        "compassos": int(math.ceil(n / 4)), "batidas": n})
         for k in range(n):
             batidas.append({"t": round(ini + k * passo, 4), "secao": i, "compasso": k // 4 + 1, "tempo": k % 4 + 1, "forte": k % 4 == 0})
-    return {"versao": 1, "origem": "planejada pela partitura (motion/audio/climas.json); a seção 'medicao' vem da análise do áudio renderizado",
+    return {"versao": 1, "origem": "planejada pela composição (motion/audio/composicao.json); a seção 'medicao' vem da análise do áudio renderizado",
             "secoes": secoes, "batidas": batidas, "eventos": []}
 
 
@@ -92,18 +93,116 @@ def _executar_node(motion: Motion, spec: dict, pasta_audio: Path, total_secoes: 
     return json.loads(man.read_text(encoding="utf-8"))
 
 
+DUR_EFEITO = {"impacto": 3.2, "whoosh": 1.3, "nota": 5.0, "passos": 5.0, "tecido": 0.7, "pergaminho": 1.0, "revelar": 2.4, "ping": 2.6, "faixa": 0.6, "rota": 1.2}
+
+# Descrição dos instrumentos sintéticos (para a linha do tempo mestre e o relatório): síntese, envelope e panorâmica.
+INSTRUMENTOS = {
+    "pad": ("3 osciladores dente de serra/triângulo desafinados por nota + passa-baixas com LFO lento", "ataque 2–3,4 s; liberação 3–4,5 s", "vozes abertas em ±0,5"),
+    "cordas": ("dente de serra desafinada ±9 cents + vibrato + passa-baixas", "ataque 1,6–2,4 s; liberação 3–4 s", "vozes abertas em ±0,5"),
+    "coro": ("dente de serra com filtros de formantes (/a/) e vibrato — timbre eletrônico", "ataque 2,8 s; liberação 3,5 s", "±0,45"),
+    "sub": ("seno + triângulo graves com batimento lento", "ataque 3 s; liberação 3,5 s", "centro"),
+    "piano": ("piano aditivo (7 parciais) com martelo de ruído", "martelo 40 ms; decaimento por parcial", "segue a altura (±0,6)"),
+    "palheta": ("dente de serra com vibrato e filtro nasal (formante)", "ADSR 60 ms/120 ms/0,8/250 ms", "centro"),
+    "lira": ("dedilhado aditivo (5 parciais)", "ataque 4 ms; queda 0,3–1,7 s", "±0,33 alternado"),
+    "trompa": ("2 dentes de serra + passa-baixas que abre no ataque", "ataque 0,35 s; liberação 0,6 s", "centro"),
+}
+
+
+def _plano_em(tl: Timeline, t: float):
+    import bisect
+    inicios = [p.inicio for p in tl.planos]
+    return tl.planos[max(0, bisect.bisect_right(inicios, t) - 1)]
+
+
+def _trecho(texto: str, n: int = 110) -> str:
+    texto = " ".join((texto or "").split())
+    return texto if len(texto) <= n else texto[: n - 1].rsplit(" ", 1)[0] + "…"
+
+
+def _justificativa(ev: dict, plano) -> str:
+    if ev.get("origem") == "motion":
+        return f"sincronizado com a animação '{ev.get('comp')}' (informação revelada na tela: {plano.fonte.get('titulo', '')})"
+    if ev.get("auto"):
+        return "transição importante entre seções (dip): whoosh discreto, subordinado à fala"
+    return f"efeito previsto no roteiro visual da cena: {plano.descricao}"
+
+
+def linha_mestre(tl: Timeline, man: dict, secoes: list[dict], eventos: list[dict], total: float, ref: float, grade: dict | None) -> dict:
+    """Linha do tempo mestre do áudio: cada evento com início, duração, tipo/instrumento, notas ou parâmetros de síntese,
+    volume, envelope, panorâmica, cena associada e relação com a narração. Mesma referência temporal absoluta do vídeo."""
+    perfis, alvos = man.get("perfis", {}), man.get("alvosPico", {})
+    efeitos = []
+    for ev in eventos:
+        p = _plano_em(tl, ev["t"])
+        perf = perfis.get(ev["tipo"], {})
+        efeitos.append({"t": ev["t"], "dur": ev.get("dur") or DUR_EFEITO.get(ev["tipo"], 1.0), "tipo": ev["tipo"], "variante": ev.get("variante", 0),
+                        "parametros_sintese": perf.get("sintese"), "volume_pico_dbfs": round(ref + alvos.get(ev["tipo"], -12), 1), "envelope": perf.get("envelope"),
+                        "pan": perf.get("pan"), "papel": perf.get("papel"), "cena": ev.get("cena") or p.cena_id, "plano": p.id,
+                        "relacao_narracao": f"sob a fala: “{_trecho(p.narracao)}”", "justificativa": _justificativa(ev, p)})
+    musica = []
+    for s_man in man.get("secoes", []):
+        c = CLIMAS[s_man["clima"]]
+        base = s_man["ini"]
+        p0 = _plano_em(tl, base + 0.05)
+        marcos = []
+        for m in s_man.get("marcos", []):
+            if m["tipo"] == "pulso":
+                continue
+            item = {"t": round(base + m["t"], 3), "tipo": m["tipo"], "compasso": m["compasso"]}
+            for k in ("notas", "instrumento", "camadas", "intens", "compassos", "ciclo"):
+                if m.get(k) is not None:
+                    item[k] = m[k]
+            marcos.append(item)
+        musica.append({"secao": s_man["id"], "clima": s_man["clima"], "ini": s_man["ini"], "fim": s_man["fim"], "bpm": s_man["bpm"], "compasso": "4/4",
+                       "tonalidade_modo": c.get("modo"), "emocao": c.get("emocao"), "ocorrencia": s_man.get("ocorrencia", 0), "cadencia_final": bool(s_man.get("fimFilme")),
+                       "nivel_rms_alvo_dbfs": round(ref - 17 + c["nivel_db"], 1), "rms_medido_dbfs": round(s_man.get("rmsMusicaDb", -99), 1),
+                       "pulsos": sum(1 for m in s_man.get("marcos", []) if m["tipo"] == "pulso"), "ambiencias": s_man.get("ambiencias", []),
+                       "abre_com_a_fala": f"“{_trecho(p0.narracao, 90)}”", "marcos": marcos})
+    automacao = [{"t": ev["t"], "tipo": ev["tipo"], "dur": ev.get("dur"), "modo": ev.get("modo"), "cena": ev.get("cena")}
+                 for ev in tl.eventos_audio if ev["tipo"] in ("silencio", "musica_nivel") and ev["t"] < total]
+    return {"versao": 2, "referencia_temporal": "segundos absolutos do vídeo (0 = primeiro quadro); a narração começa em 0",
+            "duracao_s": round(total, 3), "narracao": {"rms_ativo_dbfs": ref, "arquivo": "original, sem alteração"},
+            "instrumentos": {k: {"sintese": a, "envelope": b, "pan": c} for k, (a, b, c) in INSTRUMENTOS.items()},
+            "musica": musica, "efeitos": efeitos, "automacao": automacao,
+            "beats": "beats.json (mesma referência temporal)" if grade else None}
+
+
+def _rms_fala_por_trecho(narr: dict, trechos: list[tuple[float, float]], margem_db: float = 4.0) -> list[float]:
+    """RMS ativo da narração em cada trecho (só quadros com fala), limitado a ±`margem_db` do valor global."""
+    rms = narr.get("rms_quadros_db")
+    ativo = narr.get("atividade")
+    ref = narr["rms_ativo_db"]
+    if rms is None or ativo is None:
+        return [ref] * len(trechos)
+    hz = narr.get("resolucao_hz", 20.0)
+    out = []
+    for ini, fim in trechos:
+        a, b = int(ini * hz), int(fim * hz)
+        sel = rms[a:b][ativo[a:b]]
+        v = float(10 * np.log10(np.mean(10 ** (sel / 10)))) if len(sel) >= 20 else ref
+        out.append(round(min(ref + margem_db, max(ref - margem_db, v)), 2))
+    return out
+
+
 def construir_stems_web(tl: Timeline, narr: dict, pasta_audio: Path, motion: Motion, limite: float | None = None, grade: dict | None = None) -> dict:
-    """Mesmo contrato de `audio_mixer.construir_stems`: devolve {musica, efeitos, fontes}."""
+    """Mesmo contrato de `audio_mixer.construir_stems`: devolve {musica, efeitos, fontes} (+ manifesto e linha do tempo mestre)."""
     pasta_audio.mkdir(parents=True, exist_ok=True)
     total = min(tl.duracao_video, limite) if limite else tl.duracao_video
     ref = narr["rms_ativo_db"]
-    secoes = []
+    secoes, vezes = [], {}
+    local = _rms_fala_por_trecho(narr, [(s["inicio"], s["fim"]) for s in tl.secoes])
     for i, s in enumerate(tl.secoes):
         ini, fim = s["inicio"], min(s["fim"], total + 1.5)
         if ini >= total:
             break
+        k = vezes.get(s["musica"], 0)
+        vezes[s["musica"]] = k + 1
         secoes.append({"id": f"{i:02d}-{s['secao']}", "clima": s["musica"], "bpm": bpm(s["musica"]), "ini": ini, "fim": fim,
-                       "nivelDb": CLIMAS[s["musica"]]["nivel_db"], "ambiencias": list(s["ambiencia"]), "primeira": i == 0})
+                       "nivelDb": CLIMAS[s["musica"]]["nivel_db"], "ambiencias": list(s["ambiencia"]), "primeira": i == 0, "ocorrencia": k, "fimFilme": False,
+                       "ref": local[i]})                 # nível da fala NESTE trecho (a música acompanha a voz local)
+    final_planejado = not limite and secoes and secoes[-1]["fim"] >= total - 0.01 and CLIMAS[secoes[-1]["clima"]].get("final")
+    if final_planejado:
+        secoes[-1]["fimFilme"] = True                     # cadência IV–V–I e decaimento natural no fim do filme
     contadores: dict[str, int] = {}
     eventos = []
     for ev in tl.eventos_audio:
@@ -112,8 +211,10 @@ def construir_stems_web(tl: Timeline, narr: dict, pasta_audio: Path, motion: Mot
             continue
         k = contadores.get(tipo, 0)
         contadores[tipo] = k + 1
-        eventos.append({"t": round(ev["t"], 4), "tipo": tipo, "variante": k % 4, "dur": ev.get("dur", 0.0)})
-    spec = {"saida": pasta_audio / "webaudio", "ref": ref, "xf": XF, "cauda": CAUDA, "janela": 60, "total": total, "secoes": secoes, "eventos": eventos}
+        eventos.append({"t": round(ev["t"], 4), "tipo": tipo, "variante": k % 4, "dur": ev.get("dur", 0.0),
+                        **{c: ev[c] for c in ("cena", "auto", "origem", "comp") if c in ev}})
+    spec = {"saida": pasta_audio / "webaudio", "ref": ref, "xf": XF, "cauda": CAUDA, "janela": 60, "total": total, "secoes": secoes,
+            "eventos": [{k: e[k] for k in ("t", "tipo", "variante", "dur")} for e in eventos]}
     man = _executar_node(motion, spec, pasta_audio, len(secoes))
 
     N = int(math.ceil(total * SR))
@@ -123,7 +224,8 @@ def construir_stems_web(tl: Timeline, narr: dict, pasta_audio: Path, motion: Mot
     usados: list[dict] = []
     for s in man["secoes"]:
         am._somar(musica, am.carregar_audio(Path(s["musica"])), s["inicioAbs"])
-        usados.append({"tipo": "musica", "nome": s["clima"], "origem": f"sintetizada por código (Web Audio: osciladores, filtros e envelopes; {s['bpm']:g} BPM, 4/4)",
+        c = CLIMAS[s["clima"]]
+        usados.append({"tipo": "musica", "nome": s["clima"], "origem": f"sintetizada por código (Web Audio; {s['bpm']:g} BPM, 4/4; {c.get('modo', '')})",
                        "ini": s["ini"], "fim": s["fim"]})
         if s.get("amb"):
             am._somar(efeitos, am.carregar_audio(Path(s["amb"])), s["inicioAbs"])
@@ -132,10 +234,17 @@ def construir_stems_web(tl: Timeline, narr: dict, pasta_audio: Path, motion: Mot
     for x in man["sfx"]:
         am._somar(efeitos, am.carregar_audio(Path(x["arquivo"])), x["inicioAbs"])
     for ev in eventos:
-        usados.append({"tipo": ev["tipo"], "t": ev["t"], "origem": "sintetizado por código (Web Audio)", "cena": None})
+        usados.append({"tipo": ev["tipo"], "t": ev["t"], "origem": "sintetizado por código (Web Audio)", "cena": ev.get("cena")})
     pontos_m, pontos_x = am.pontos_automacao(tl, total)
-    saida = am.finalizar_stems(tl, total, limite, musica, efeitos, raw_m, raw_x, pontos_m, pontos_x, pasta_audio, usados)
+    saida = am.finalizar_stems(tl, total, limite, musica, efeitos, raw_m, raw_x, pontos_m, pontos_x, pasta_audio, usados, cadencia_natural=bool(final_planejado))
     saida["manifesto"] = man
+    mestre = linha_mestre(tl, man, secoes, eventos, total, ref, grade)
+    salvar_json(pasta_audio / "linha-do-tempo-audio.json", mestre)
+    salvar_json(pasta_audio / "composicao-usada.json", {"tonalidade": COMPOSICAO["tonalidade"], "compasso": COMPOSICAO["compasso"], "motivos": COMPOSICAO["motivos"],
+                                                       "duracao_total_s": round(total, 3), "secoes": [{k: v for k, v in s.items() if k != "ambiencias"} for s in secoes],
+                                                       "climas_usados": {c: CLIMAS[c] for c in sorted({s["clima"] for s in secoes})}})
+    saida["mestre"] = mestre
+    saida["juncoes"] = sorted({round(s["ini"], 3) for s in secoes[1:]})
     return saida
 
 

@@ -66,6 +66,8 @@ class Config:
     motion_preset: str = "medium"
     motion_trabalhadores: int = 3
     so_motion: bool = False         # renderiza apenas os clipes de motion e para
+    so_audio: bool = False          # gera stems, mixagem, relatório de áudio e gráficos e para (testes de amostra)
+    true_peak: float = -1.0         # teto de true peak da mixagem (dBTP)
     revisao_rodada: int | None = None   # gera as folhas de contato por batida da rodada N (09-revisao/) e para antes da renderização
     audio_web: bool = True          # trilha e efeitos com a Web Audio API (OfflineAudioContext); False = síntese NumPy anterior
 

@@ -474,7 +474,7 @@ def aplicar_clipes_motion(tl: Timeline, pedidos: list, fps: int):
             tl.eventos_audio = [ev for ev in tl.eventos_audio if not (ev.get("cena") == pl.cena_id and ev["tipo"] in proprios & {"impacto", "whoosh"})]
         for e in ped.eventos:
             if e.get("tipo") in ("revelar", "ping", "faixa", "rota", "whoosh", "impacto"):
-                novos.append({"t": round(pl.inicio + float(e["t"]), 3), "tipo": e["tipo"], "cena": pl.cena_id})
+                novos.append({"t": round(pl.inicio + float(e["t"]), 3), "tipo": e["tipo"], "cena": pl.cena_id, "origem": "motion", "comp": ped.comp})
     if novos:
         tl.eventos_audio.extend(novos)
         tl.eventos_audio.sort(key=lambda ev: ev["t"])
