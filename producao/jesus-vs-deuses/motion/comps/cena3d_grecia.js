@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { iniciar3D } from '../engine/base3d.js';
 import { criarCeu, criarSol, criarPoeira3D, criarTrilho } from '../engine/cena3d.js';
-import { temploDorico, material, malha, terreno } from '../engine/arq.js';
+import { temploDorico, colunaDorica, material, malha, terreno, caixa, rochedo } from '../engine/arq.js';
 import { rngFor } from '../engine/rng.js';
 import * as tex from '../engine/tex.js';
 import { smooth } from '../engine/ease.js';
@@ -15,8 +15,10 @@ const def = {
   render: { exposicao: 1.0 },
   async montar({ cena, P, D, spec }) {
     const seed = spec.seed ?? 1;
-    const paraSol = norm([-0.78, 0.36, 0.5]);            // sol baixo, à esquerda e à frente do templo (luz rasante dourada)
-    const ceu = criarCeu({ hor: 0xffd9a8, meio: 0x9fc4ec, zen: 0x2c63b4, baixo: 0x6a5a40, sol: 0xffd49a, sunDir: paraSol, expo: 0.38, brilho: 1.25, nuvens: 0.8, cobertura: 0.32, nuvem: 0xfff0dc, nuvemSombra: 0x8a8aa8 });
+    const R_ = P.vista === 'ruinas';
+    const paraSol = norm(R_ ? [-0.72, 0.13, -0.68] : [-0.78, 0.36, 0.5]);       // ruínas: pôr do sol atrás, em contraluz
+    const ceu = R_ ? criarCeu({ hor: 0xff9a58, meio: 0xc88a8a, zen: 0x2a3a6a, baixo: 0x4a3828, sol: 0xffb070, sunDir: paraSol, expo: 0.45, brilho: 1.2, nuvens: 0.85, cobertura: 0.42, nuvem: 0xffb88a, nuvemSombra: 0x4a3a50 })
+      : criarCeu({ hor: 0xffd9a8, meio: 0x9fc4ec, zen: 0x2c63b4, baixo: 0x6a5a40, sol: 0xffd49a, sunDir: paraSol, expo: 0.38, brilho: 1.25, nuvens: 0.8, cobertura: 0.32, nuvem: 0xfff0dc, nuvemSombra: 0x8a8aa8 });
     cena.fog = new THREE.FogExp2(0xefc99a, 0.0017);
 
     const tM1 = tex.marmore({ tam: 1024, semente: 52, tambores: 11, base: [232, 222, 200], veios: 0.35 });
@@ -36,9 +38,59 @@ const def = {
       degrau: material(tBloco, { rep: [1, 1], normal: 0.9, rug: 0.9, env: 0.8 }),
       cela: material(tBloco, { rep: [1, 1], normal: 0.9, rug: 0.9, env: 0.8, cor: 0xe6dcc6 }),
     };
-    const templo = temploDorico({ nF: 6, nL: 13, D: 2.25, H: 10.4, entre: 5.2, mats, estrias: 20 });
-    cena.add(templo);
-    const dim = templo.userData.dim;
+    const ruinas = P.vista === 'ruinas';
+    if (!ruinas) {
+      const templo = temploDorico({ nF: 6, nL: 13, D: 2.25, H: 10.4, entre: 5.2, mats, estrias: 20 });
+      cena.add(templo);
+    } else {
+      // Santuário em ruínas (genérico, não um sítio específico): crepidoma, colunas inteiras e quebradas em alturas
+      // diferentes, um trecho de arquitrave, tambores caídos e blocos espalhados.
+      const rr = rngFor(seed, 31), nF = 6, nL = 13, entre = 5.2, D = 2.25;
+      for (const k of ['fuste', 'capitel', 'arquitrave']) mats[k].color.setHex(0xcbb89c);              // mármore envelhecido
+      const mFolha = new THREE.MeshStandardMaterial({ color: 0x55603c, roughness: 1 });
+      const larg = (nF - 1) * entre + D * 1.6, comp = (nL - 1) * entre + D * 1.6;
+      for (let k = 0; k < 3; k++) cena.add(malha(caixa(larg + (3 - k) * 1.4, 0.55, comp + (3 - k) * 1.4, { raio: 0.04, esc: 0.35 }), mats.degrau, { pos: [0, -1.45 + k * 0.55, 0] }));
+      const yBase = 0.2, inteiras = [];
+      for (let i = 0; i < nF; i++) for (let j = 0; j < nL; j++) {
+        if (i > 0 && i < nF - 1 && j > 0 && j < nL - 1) continue;              // só o peristilo
+        const x = -((nF - 1) * entre) / 2 + i * entre, z = -((nL - 1) * entre) / 2 + j * entre;
+        const sorte = rr();
+        if (sorte < 0.28) {                                                     // de pé, inteira
+          const c = colunaDorica({ D, H: 10.4, estrias: 20, mats }); c.position.set(x, yBase, z); cena.add(c); inteiras.push([i, j, x, z]);
+        } else if (sorte < 0.72) {                                              // toco quebrado (só o fuste) com topo irregular
+          const h = 1.2 + rr() * 5.5;
+          const c = colunaDorica({ D, H: h / 0.915, estrias: 20, mats }); c.children.splice(1);   // remove capitel e ábaco
+          c.position.set(x, yBase, z); cena.add(c);
+          const topo = malha(rochedo(D * 0.42, seed * 100 + i * 13 + j), mats.fuste, { pos: [x, yBase + h - 0.05, z] }); topo.scale.y = 0.35; cena.add(topo);
+        } else {                                                                // caída: tambores no chão ao lado
+          const n = 2 + Math.floor(rr() * 3), a = rr() * Math.PI * 2;
+          for (let k = 0; k < n; k++) {
+            const tamb = new THREE.CylinderGeometry(D * 0.46, D * 0.48, 1.25, 24); tamb.rotateZ(Math.PI / 2);
+            const m = malha(tamb, mats.fuste, { pos: [x + Math.cos(a) * (2.2 + k * 1.35), -0.2 + D * 0.47 * 0.9, z + Math.sin(a) * (2.2 + k * 1.35)] });
+            m.rotation.y = -a + (rr() - 0.5) * 0.4; cena.add(m);
+          }
+        }
+      }
+      // um trecho de arquitrave sobre duas colunas inteiras vizinhas, se houver
+      for (const [i, j, x, z] of inteiras) {
+        const viz = inteiras.find(([i2, j2]) => (i2 === i + 1 && j2 === j) || (j2 === j + 1 && i2 === i));
+        if (!viz) continue;
+        const [, , x2, z2] = viz, L = Math.hypot(x2 - x, z2 - z) + 1.6;
+        const ar = malha(caixa(L, 1.5, 1.7, { raio: 0.05, esc: 0.4 }), mats.arquitrave, { pos: [(x + x2) / 2, yBase + 10.4 + 0.75, (z + z2) / 2] });
+        ar.rotation.y = Math.abs(x2 - x) > 0.1 ? 0 : Math.PI / 2; cena.add(ar);
+        break;
+      }
+      for (let k = 0; k < 70; k++) {                                            // arbustos entre as pedras
+        const bx = (rr() - 0.5) * 80, bz = (rr() - 0.5) * 100; if (Math.abs(bx) < larg / 2 - 1 && Math.abs(bz) < comp / 2 - 1 && rr() < 0.7) continue;
+        const sc = 0.35 + rr() * 0.6, m = malha(rochedo(1, seed * 300 + k), mFolha, { pos: [bx, (Math.abs(bx) < larg / 2 + 2 && Math.abs(bz) < comp / 2 + 2 ? 0.2 : -1.5) + sc * 0.2, bz] });
+        m.scale.set(sc * 1.3, sc * 0.8, sc * 1.2); cena.add(m);
+      }
+      for (let k = 0; k < 40; k++) {                                            // blocos soltos pelo terreno
+        const bx = (rr() - 0.5) * 70, bz = (rr() - 0.5) * 95; if (Math.abs(bx) < larg / 2 && Math.abs(bz) < comp / 2) continue;
+        const b = malha(caixa(1 + rr() * 1.4, 0.6 + rr() * 0.6, 0.8 + rr(), { raio: 0.08, esc: 0.4 }), mats.degrau, { pos: [bx, -1.4 + rr() * 0.3, bz] });
+        b.rotation.set((rr() - 0.5) * 0.3, rr() * 3, (rr() - 0.5) * 0.3); cena.add(b);
+      }
+    }
 
     // terraço, colinas e rocha: altura procedural determinística
     const R = tex.criarRuido(seed + 70);
@@ -75,14 +127,17 @@ const def = {
     cip.count = n; cip.castShadow = true; cip.receiveShadow = true; cip.instanceMatrix.needsUpdate = true; cena.add(cip);
 
     // luzes
-    const sol = criarSol({ cor: 0xffd29a, intensidade: 5.6, dir: paraSol, alvo: [0, 4, 0], dist: 160, caixa: 62, mapa: 4096, bias: -0.0003, normalBias: 0.07, near: 30, far: 380 });
+    const sol = criarSol({ cor: R_ ? 0xffb07a : 0xffd29a, intensidade: R_ ? 4.6 : 5.6, dir: paraSol, alvo: [0, 4, 0], dist: 160, caixa: 62, mapa: 4096, bias: -0.0003, normalBias: 0.07, near: 30, far: 380 });
     cena.add(sol, sol.target);
     cena.add(new THREE.HemisphereLight(0xa4aabc, 0x7a6040, 0.55));          // céu menos saturado: a sombra não fica azul demais
     const poeira = criarPoeira3D({ semente: seed, n: 500, caixa: [-45, 0, -45, 45, 22, 80], vel: [0.2, 0.04, -0.08], cor: 0xffe2b0, tam: 1.8, op: 0.6 });
     cena.add(poeira);
 
     // guindaste: sobe e contorna a fachada em arco; pedimento e colunas entram em quadro
-    const trilho = criarTrilho({
+    const trilho = R_ ? criarTrilho({                                     // ruínas: caminhada baixa entre os tocos de coluna
+      pos: [[-27, 1.5, 40], [-24, 1.7, 22], [-22, 2.0, 4], [-20.5, 2.4, -14]], alvo: [[-6, 4.5, 8], [-2, 5, -8], [2, 5.5, -26], [6, 6, -46]],
+      fov: [42, 36], curva: (x) => 0.35 * x + 0.65 * smooth(x),
+    }) : criarTrilho({
       pos: [[-36, 1.9, 58], [-24, 4.2, 70], [-3, 8.5, 80], [22, 12.5, 74], [38, 15, 58]],
       alvo: [[-7, 5.5, 33], [-4, 8.5, 28], [0, 10.5, 18], [2, 10, 10], [3, 8.5, 2]],
       fov: [44, 34], curva: (x) => 0.3 * x + 0.7 * smooth(x),

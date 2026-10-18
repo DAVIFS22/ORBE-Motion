@@ -38,6 +38,10 @@ _GOL = "colina das cruzes (reconstrução artística; local exato e forma das cr
 _TUM = "túmulo escavado na rocha do tipo usado na Judeia do século I (reconstrução artística; não é o local histórico)"
 _ESC = "rolo e lamparina (composição artística; a escrita do rolo é estilizada, não é um manuscrito real)"
 _JUD = "aldeia da Galileia do século I (reconstrução artística; não representa um sítio específico)"
+_RUI = "ruínas de um santuário dórico (composição artística genérica; não é um sítio específico)"
+_EGI = "salão hipostilo inspirado em Karnak (reconstrução artística; inscrições e cores estilizadas)"
+_GRE = "templo dórico inspirado no Templo de Zeus em Olímpia (reconstrução artística; sem policromia nem esculturas)"
+_FIO = "fiorde nórdico (paisagem artística; não é um local real nem mostra o evento mitológico)"
 
 _BASE = {   # (comp, vista, descrição) -> posições no trilho; cada posição vira um still diferente (outro ponto de vista)
     "galileia_lago": ("cena3d_galileia", "lago", _GAL, (0.1, 0.4, 0.7, 1.0)),
@@ -55,6 +59,10 @@ _BASE = {   # (comp, vista, descrição) -> posições no trilho; cada posição
     "escritos_rolo": ("cena3d_escritos", "rolo", _ESC, (0.2, 0.6, 1.0)),
     "judeia_viela": ("cena3d_judeia", "viela", _JUD, (0.15, 0.45, 0.75)),
     "judeia_telhados": ("cena3d_judeia", "telhados", _JUD, (0.2, 0.6, 1.0)),
+    "grecia_ruinas": ("cena3d_grecia", "ruinas", _RUI, (0.1, 0.35, 0.6, 0.85, 1.0)),
+    "egito_salao": ("cena3d_egito", "", _EGI, (0.25, 0.55, 0.85)),
+    "grecia_templo": ("cena3d_grecia", "", _GRE, (0.15, 0.5, 0.85)),
+    "fiorde": ("cena3d_fiorde", "", _FIO, (0.2, 0.5, 0.8)),
 }
 STILLS: dict[str, Still] = {f"{nome}_{k}": Still(comp, vista, f, 3 + 2 * k, desc)
                             for nome, (comp, vista, desc, fs) in _BASE.items() for k, f in enumerate(fs)}
@@ -80,7 +88,12 @@ _GRUPOS: dict[tuple[str | None, str], list[str]] = {
     (None, "cruz_colina"): ["golgota_tempestade", "golgota_distante"],
     (None, "tumulo"): ["tumulo_interior", "tumulo_exterior", "tumulo_saida"],
     (None, "amanhecer"): ["golgota_amanhecer", "galileia_lago"],
+    (None, "ruinas"): ["grecia_ruinas"],
+    (None, "deserto_egito"): ["egito_salao"],
     ("6-crucificacao", "tempestade"): ["golgota_tempestade"],
+    **{(s, "templo_grego"): ["grecia_templo"] for s in ("2-civilizacoes", "2c-grecia")},
+    **{(s, "nordico"): ["fiorde"] for s in ("2-civilizacoes", "2d-nordicos")},
+    ("2d-nordicos", "tempestade"): ["fiorde"],
     ("6-crucificacao", "roma_judeia"): ["golgota_distante"],
     ("7-ressurreicao", "roma_judeia"): ["golgota_distante"],
 }
@@ -94,12 +107,13 @@ def _intercalar(grupos: list[str]) -> list[str]:
 
 MAPA: dict[tuple[str | None, str], list[str]] = {k: _intercalar(v) for k, v in _GRUPOS.items()}
 SECOES_JESUS = {"3-identidade", "4-amor", "5-morte", "6-crucificacao", "7-ressurreicao", "8-comparacao", "9-encerramento"}
+SECOES_CIVILIZACOES = {"2-civilizacoes", "2b-egito", "2c-grecia", "2d-nordicos"}
 
 
 def escolher(secao: str, motivo: str, contador: dict) -> str | None:
-    """Still para um plano com cenário `motivo` na `secao` (gira entre as variações). Só na parte sobre Jesus (seções 3–9),
-    exceto onde o storyboard pede o mesmo cenário em todo o filme (céu estrelado da abertura continua procedural)."""
-    if secao not in SECOES_JESUS:
+    """Still para um plano com cenário `motivo` na `secao` (gira entre as variações). Vale para as civilizações e para a parte
+    sobre Jesus; a abertura mantém os cenários próprios (céu estrelado, tempestade, cosmos)."""
+    if secao not in SECOES_JESUS | SECOES_CIVILIZACOES:                 # a abertura mantém os cenários próprios
         return None
     opcoes = MAPA.get((secao, motivo)) or MAPA.get((None, motivo))
     if not opcoes:
