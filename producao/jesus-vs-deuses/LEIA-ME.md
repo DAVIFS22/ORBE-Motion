@@ -77,6 +77,10 @@ Recursos CC0 do Poly Haven (HDRI/modelos) têm cliente pronto em `motor_video/re
 logs/              log detalhado de cada execução
 ```
 
+## Tempos medidos (referência)
+
+Execução completa de 29:16 de vídeo, em uma máquina de 4 núcleos, sem GPU: 17 clipes 3D em qualidade `teste` ≈ 35 min (só na primeira vez; depois ficam em cache), áudio ≈ 3,5 min, renderização do vídeo (libx264, preset fast, CRF 19, 4 processos) ≈ 40 min, validação completa ≈ 10 min. O MP4 final teve ≈ 670 MB. Qualidades 3D maiores multiplicam o tempo do 3D: use `--listar-3d` para ver a estimativa antes e `--orcamento-3d` para limitar.
+
 ## Testes
 
 ```

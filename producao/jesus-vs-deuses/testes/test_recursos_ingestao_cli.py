@@ -172,6 +172,29 @@ class TestRelatorioECli(unittest.TestCase):
             md2 = project_report.gerar(self._ctx(True), Path(d) / "ok")
             self.assertIn("APROVADO em todas", md2.read_text(encoding="utf-8"))
 
+    def test_relatorio_secao_3d(self):
+        sem = self._ctx(True)
+        with tempfile.TemporaryDirectory() as d:
+            t0 = project_report.gerar(sem, Path(d)).read_text(encoding="utf-8")
+        self.assertIn("Animação 3D (Blender), uso seletivo", t0)
+        self.assertIn("Nenhuma cena 3D nesta execução", t0)
+        ctx = self._ctx(True)
+        ctx["blender"] = "python: /x/bin/python (versão 5.2.2)"
+        ctx["config3d"] = {"prioridade": 2, "qualidade": "teste", "dispositivo": "cpu", "motor": "CYCLES", "orcamento_min": 40.0}
+        ctx["timeline"].update({"planos_3d": 2, "planos_video": 0})
+        ctx["cenas3d"] = [
+            {"plano_id": "a03-templos#1", "cena": "templo_egipcio", "prioridade": 1, "duracao": 5.0, "status": "renderizado", "tempo_real_s": 150.0},
+            {"plano_id": "d04-anubis#1", "cena": "deus_anubis", "prioridade": 2, "duracao": 5.0, "status": "reaproveitado", "tempo_real_s": 0.0},
+            {"plano_id": "d05-ra#1", "cena": "deus_ra", "prioridade": 2, "duracao": 4.0, "status": "cortado_orcamento", "tempo_real_s": 0.0}]
+        with tempfile.TemporaryDirectory() as d:
+            t1 = project_report.gerar(ctx, Path(d)).read_text(encoding="utf-8")
+        self.assertIn("2 clipe(s) usados, 10 s no total = 100.0% do vídeo", t1)       # 10 s de 10 s no contexto de teste
+        self.assertIn("| `a03-templos#1` | templo_egipcio | P1 | 5.0 s | renderizado | 2.5 min |", t1)
+        self.assertIn("cortado (orçamento)", t1)
+        self.assertIn("reconstruções ou representações artísticas", t1)
+        self.assertIn("orçamento de 40 min", t1)
+        self.assertIn("2 com animação 3D", t1)
+
     def test_cli(self):
         with self.assertRaises(SystemExit) as e, contextlib.redirect_stdout(io.StringIO()):
             cli(["--help"])

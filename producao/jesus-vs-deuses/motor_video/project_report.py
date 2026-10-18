@@ -48,6 +48,40 @@ def escrever_creditos(assets: list[dict], destino: Path):
     destino.write_text("\n".join(linhas), encoding="utf-8")
 
 
+def _secao_3d(ctx: dict, add):
+    """Animação 3D: o que foi usado, por quê, quanto custou e como está rotulado."""
+    ped = ctx.get("cenas3d") or []
+    c3 = ctx.get("config3d") or {}
+    add("## Animação 3D (Blender), uso seletivo")
+    add("")
+    if not ped:
+        add(f"Nenhuma cena 3D nesta execução (prioridade {c3.get('prioridade', 0)}; "
+            f"{'Blender: ' + ctx['blender'] if ctx.get('blender') else 'Blender não encontrado ou desativado'}). "
+            "Os planos usam imagens reais, quando há, ou cenário 2D gerado por código.")
+        add("")
+        return
+    usados = [p for p in ped if p["status"] in ("renderizado", "reaproveitado")]
+    seg = sum(p["duracao"] for p in usados)
+    total = ctx.get("duracao_video_s") or 1
+    add(f"- Blender: {ctx.get('blender') or 'não informado'}; motor {c3.get('motor')}, dispositivo {str(c3.get('dispositivo')).upper()}, "
+        f"qualidade \"{c3.get('qualidade')}\", prioridade até P{c3.get('prioridade')}"
+        + (f", orçamento de {c3['orcamento_min']:g} min" if c3.get("orcamento_min") else "") + ".")
+    add(f"- {len(usados)} clipe(s) usados, {seg:.0f} s no total = {seg / total * 100:.1f}% do vídeo; o resto é imagem real, "
+        "arte/cenário 2D, texto e mapas. P1 = abertura, reconstruções e momentos de impacto; P2 = só onde não há imagem real adequada.")
+    add("- Todas as cenas 3D são **reconstruções ou representações artísticas** e levam rótulo na tela; os deuses seguem a iconografia de cada "
+        "tradição, o Ragnarök é tratado como evento mítico e nenhuma cena mostra Jesus ou afirma a aparência dele.")
+    add("")
+    add("| Plano | Cena 3D | Prio. | Duração | Situação | Render |")
+    add("|---|---|---|---|---|---|")
+    for p in sorted(ped, key=lambda x: x["plano_id"]):
+        sit = {"renderizado": "renderizado", "reaproveitado": "reaproveitado (cache)", "cortado_orcamento": "cortado (orçamento)",
+               "falhou": "FALHOU"}.get(p["status"], p["status"])
+        add(f"| `{p['plano_id']}` | {p['cena']} | P{p['prioridade']} | {p['duracao']:.1f} s | {sit} | "
+            f"{p['tempo_real_s'] / 60:.1f} min |" if p.get("tempo_real_s") else
+            f"| `{p['plano_id']}` | {p['cena']} | P{p['prioridade']} | {p['duracao']:.1f} s | {sit} | |")
+    add("")
+
+
 def gerar(ctx: dict, pasta: Path) -> Path:
     pasta.mkdir(parents=True, exist_ok=True)
     assets = ctx["assets"]
@@ -97,11 +131,13 @@ def gerar(ctx: dict, pasta: Path) -> Path:
     add("")
     add("## Linha do tempo")
     add("")
-    add(f"- {tl['cenas']} cenas, {tl['planos']} planos; {tl['planos_com_imagem']} com imagem baixada e licenciada, "
-        f"{tl['planos_gerados']} com cenário gerado por código (alternativa quando não há imagem).")
+    add(f"- {tl['cenas']} cenas, {tl['planos']} planos: {tl['planos_com_imagem']} com imagem baixada e licenciada, "
+        f"{tl.get('planos_video', 0)} com filmagem licenciada, {tl.get('planos_3d', 0)} com animação 3D (Blender) e "
+        f"{tl['planos_gerados']} com cenário 2D gerado por código (alternativa quando não há imagem).")
     for a in ctx.get("avisos", []):
         add(f"- Aviso: {a}")
     add("")
+    _secao_3d(ctx, add)
     add("## Imagens e licenças")
     add("")
     cont = Counter(a["fonte"] for a in assets)
@@ -111,7 +147,8 @@ def gerar(ctx: dict, pasta: Path) -> Path:
         add("**Nenhuma imagem de terceiros foi baixada nesta execução.** " + (ctx.get("rede") or ""))
     add("")
     if ctx["pendencias"]:
-        add(f"### Pendências ({len(ctx['pendencias'])} cena(s) sem imagem adequada)")
+        cenas_pend = {p["cena"] for p in ctx["pendencias"]}
+        add(f"### Pendências ({len(cenas_pend)} cena(s) sem imagem adequada; {len(ctx['pendencias'])} consulta(s) sem resultado)")
         add("")
         add("Nessas cenas foi usado um cenário gerado por código (ilustração estilizada, **não** fotografia). "
             "Rode de novo com acesso à internet, ou coloque imagens próprias em uma pasta e use `--imagens`.")
@@ -147,8 +184,11 @@ def gerar(ctx: dict, pasta: Path) -> Path:
         f"({r.get('blocos_reaproveitados', 0)} reaproveitados); {r.get('quadros')} quadros em {r.get('tempo_renderizacao_s')} s.")
     add(f"- Movimento de câmera calculado por código (zoom, panorâmica, Ken Burns) com foco protegido; transições: "
         f"{', '.join(f'{k} ({v})' for k, v in tl['transicoes'].items())}.")
-    add("- Não implementado: parallax com camadas de profundidade (exigiria segmentação de imagem); detecção de rostos usa "
-        "OpenCV só se instalado, senão um mapa de saliência.")
+    if r.get("blocos") and r.get("blocos_reaproveitados") == r.get("blocos"):
+        add("- Todos os blocos já estavam prontos (execução anterior com os mesmos planos): o tempo acima é só o de concatenar e "
+            "conferir; o tempo de renderização original consta no log da primeira execução.")
+    add("- Paralaxe 2.5D de fotos reais: disponível como cena 3D de prioridade 3 (`--prioridade-3d 3`); só se aplica a fotos baixadas. "
+        "Detecção de rostos usa OpenCV se instalado, senão um mapa de saliência.")
     add("")
     add("## Verificações")
     add("")

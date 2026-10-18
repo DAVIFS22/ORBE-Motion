@@ -112,6 +112,11 @@ class Camada:
         quadro.paste(self.rgb, (x, y), mascara)
 
 
+def _e(h: int, v: float) -> float:
+    """Medida em pixels de um quadro de 1080 de altura, escalada para a altura `h` (layout igual em qualquer resolução)."""
+    return v * h / 1080
+
+
 def _suave(x: float) -> float:
     x = max(0.0, min(1.0, x))
     return x * x * (3 - 2 * x)
@@ -121,6 +126,7 @@ def _camada_de_texto(largura: int, altura: int, desenhar, *, sombra: int = 10, p
     """Cria RGB+máscara com sombra suave a partir de uma função `desenhar(draw)`."""
     esc = kw.pop("h", 1080) / 1080  # a sombra/respiro escalam com a resolução (verificação em baixa resolução)
     sombra = max(1, round(sombra * esc))
+    kw["deslize"] = round(kw.get("deslize", 22) * esc)
     pad = sombra * 3
     rgba = Image.new("RGBA", (largura + 2 * pad, altura + 2 * pad), (0, 0, 0, 0))
     d = ImageDraw.Draw(rgba)
@@ -157,12 +163,12 @@ def titulo_principal(texto: str, subtitulo: str | None, w: int, h: int) -> list[
             largura = medir(ln, fonte, esp)
             desenhar_espacado(d, (pad + (w - largura) / 2, y), ln, fonte, MARFIM, esp)
             y += alt_linha
-        d.line([(pad + w * 0.38, y + 12), (pad + w * 0.62, y + 12)], fill=OURO, width=4)
+        d.line([(pad + w * 0.38, y + _e(h, 12)), (pad + w * 0.62, y + _e(h, 12))], fill=OURO, width=max(1, round(_e(h, 4))))
         if subtitulo:
-            largura = medir(subtitulo, sub, 2)
-            desenhar_espacado(d, (pad + (w - largura) / 2, y + 34), subtitulo, sub, OURO, 2)
+            largura = medir(subtitulo, sub, _e(h, 2))
+            desenhar_espacado(d, (pad + (w - largura) / 2, y + _e(h, 34)), subtitulo, sub, OURO, _e(h, 2))
 
-    return [_camada_de_texto(w, altura_total + 40, desenhar, sombra=14, h=h, pos=(0, y0), entrada=1.1, saida=0.9)]
+    return [_camada_de_texto(w, altura_total + int(_e(h, 40)), desenhar, sombra=14, h=h, pos=(0, y0), entrada=1.1, saida=0.9)]
 
 
 def titulo_capitulo(texto: str, linha2: str | None, w: int, h: int) -> list[Camada]:
@@ -174,10 +180,10 @@ def titulo_capitulo(texto: str, linha2: str | None, w: int, h: int) -> list[Cama
     esp = h * 0.004
 
     def desenhar(d, pad):
-        d.rectangle([pad, pad, pad + 8, pad + int(fonte.size * 1.35) + (int(sub.size * 1.5) if linha2 else 0)], fill=OURO)
-        desenhar_espacado(d, (pad + 30, pad - 2), texto.upper(), fonte, MARFIM, esp)
+        d.rectangle([pad, pad, pad + max(1, _e(h, 8)), pad + int(fonte.size * 1.35) + (int(sub.size * 1.5) if linha2 else 0)], fill=OURO)
+        desenhar_espacado(d, (pad + _e(h, 30), pad - _e(h, 2)), texto.upper(), fonte, MARFIM, esp)
         if linha2:
-            desenhar_espacado(d, (pad + 32, pad + int(fonte.size * 1.2)), linha2, sub, OURO, 1.5)
+            desenhar_espacado(d, (pad + _e(h, 32), pad + int(fonte.size * 1.2)), linha2, sub, OURO, _e(h, 1.5))
 
     alt = int(fonte.size * 1.4) + (int(sub.size * 1.6) if linha2 else 0)
     return [_camada_de_texto(larg, alt, desenhar, sombra=9, h=h, pos=(x0, y0), entrada=0.8, saida=0.8, deslize=18)]
@@ -192,7 +198,7 @@ def cartao_versiculo(citacao: str | None, referencia: str, nota: str | None, w: 
     linhas = quebrar(f"“{citacao}”", f_cit, largura) if citacao else []
     linhas_nota = quebrar(nota, f_nota, largura) if nota else []
     alt_cit, alt_nota = int(f_cit.size * 1.35), int(f_nota.size * 1.4)
-    altura = alt_cit * len(linhas) + alt_nota * len(linhas_nota) + int(f_ref.size * 2.4) + 40
+    altura = alt_cit * len(linhas) + alt_nota * len(linhas_nota) + int(f_ref.size * 2.4) + int(_e(h, 40))
     y0 = int(h * 0.5 - altura / 2)
 
     def desenhar(d, pad):
@@ -204,9 +210,9 @@ def cartao_versiculo(citacao: str | None, referencia: str, nota: str | None, w: 
             desenhar_espacado(d, (pad + (w - medir(ln, f_nota)) / 2, y), ln, f_nota, MARFIM)
             y += alt_nota
         y += int(f_ref.size * 0.5)
-        d.line([(pad + w * 0.44, y), (pad + w * 0.56, y)], fill=OURO, width=3)
+        d.line([(pad + w * 0.44, y), (pad + w * 0.56, y)], fill=OURO, width=max(1, round(_e(h, 3))))
         ref = referencia.upper()
-        desenhar_espacado(d, (pad + (w - medir(ref, f_ref, 4)) / 2, y + 16), ref, f_ref, OURO, 4)
+        desenhar_espacado(d, (pad + (w - medir(ref, f_ref, _e(h, 4))) / 2, y + _e(h, 16)), ref, f_ref, OURO, _e(h, 4))
 
     return [_camada_de_texto(w, altura, desenhar, sombra=12, h=h, pos=(0, y0), entrada=0.9, saida=0.9)]
 
@@ -221,13 +227,13 @@ def cartao_lista(titulo: str, itens: list[str], w: int, h: int, numerar: bool = 
     camadas = []
 
     def titulo_d(d, pad):
-        desenhar_espacado(d, (pad, pad), titulo.upper(), f_tit, OURO, 5)
+        desenhar_espacado(d, (pad, pad), titulo.upper(), f_tit, OURO, _e(h, 5))
     camadas.append(_camada_de_texto(int(w * 0.7), int(f_tit.size * 1.4), titulo_d, sombra=9, h=h, pos=(x0, y_ini - int(h * 0.1)),
                                     entrada=0.7, saida=0.7))
     for i, item in enumerate(itens):
         def d_item(d, pad, i=i, item=item):
             if numerar:
-                d.ellipse([pad, pad, pad + f_item.size * 1.2, pad + f_item.size * 1.2], outline=OURO, width=4)
+                d.ellipse([pad, pad, pad + f_item.size * 1.2, pad + f_item.size * 1.2], outline=OURO, width=max(1, round(_e(h, 4))))
                 n = str(i + 1)
                 d.text((pad + f_item.size * 0.6 - medir(n, f_item) / 2, pad + f_item.size * 0.02), n, font=f_item, fill=OURO)
             d.text((pad + f_item.size * 1.7, pad + f_item.size * 0.04), item, font=f_item, fill=MARFIM)
@@ -244,9 +250,9 @@ def numero_ponto(numero: int, rotulo: str, w: int, h: int) -> list[Camada]:
 
     def desenhar(d, pad):
         d.text((pad, pad - int(f_num.size * 0.12)), str(numero), font=f_num, fill=OURO)
-        deslocamento = int(medir(str(numero), f_num)) + 28
-        d.rectangle([pad + deslocamento, pad + int(f_num.size * 0.2), pad + deslocamento + 5, pad + int(f_num.size * 0.95)], fill=OURO)
-        desenhar_espacado(d, (pad + deslocamento + 26, pad + int(f_num.size * 0.34)), rotulo.upper(), f_rot, MARFIM, 4)
+        deslocamento = int(medir(str(numero), f_num) + _e(h, 28))
+        d.rectangle([pad + deslocamento, pad + int(f_num.size * 0.2), pad + deslocamento + max(1, _e(h, 5)), pad + int(f_num.size * 0.95)], fill=OURO)
+        desenhar_espacado(d, (pad + deslocamento + _e(h, 26), pad + int(f_num.size * 0.34)), rotulo.upper(), f_rot, MARFIM, _e(h, 4))
 
     return [_camada_de_texto(int(w * 0.6), int(f_num.size * 1.2), desenhar, sombra=10, h=h, pos=(x0, y0),
                              entrada=0.7, saida=0.7)]
@@ -278,7 +284,7 @@ def legenda_queimada(texto: str, w: int, h: int) -> Camada:
         y = pad
         for ln in linhas:
             d.text((pad + (larg - medir(ln, f)) / 2, y), ln, font=f, fill=(255, 255, 255),
-                   stroke_width=3, stroke_fill=(0, 0, 0))
+                   stroke_width=max(1, round(_e(h, 3))), stroke_fill=(0, 0, 0))
             y += int(f.size * 1.3)
     return _camada_de_texto(larg, alt, desenhar, sombra=5, h=h, pos=(int((w - larg) / 2), int(h * 0.9 - alt)),
                             entrada=0.0, saida=0.0, deslize=0)

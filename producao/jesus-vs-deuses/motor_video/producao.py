@@ -236,6 +236,7 @@ def produzir(cfg: Config, pasta_entrada: Path | None = None, comando: str = "") 
                                         pasta_temp / "procedural")
         etapas.fim()
 
+        ids_3d = {p.plano_id for p in pedidos if p.status in ("renderizado", "reaproveitado")}
         assets = [a.__dict__ for a in gerenciador.assets.values()
                   if a.id in {p.asset_id for p in tl.planos if p.asset_id} | {p.fundo.get("asset_id") for p in tl.planos if p.fundo.get("asset_id")}]
         ctx = {
@@ -245,7 +246,9 @@ def produzir(cfg: Config, pasta_entrada: Path | None = None, comando: str = "") 
             "avisos": avisos,
             "timeline": {"cenas": len(planejadas), "planos": len(tl.planos),
                          "planos_com_imagem": sum(1 for p in tl.planos if p.asset_id),
-                         "planos_gerados": sum(1 for p in tl.planos if not p.asset_id),
+                         "planos_3d": sum(1 for p in tl.planos if p.id in ids_3d),
+                         "planos_video": sum(1 for p in tl.planos if p.fundo.get("tipo") == "video" and p.id not in ids_3d),
+                         "planos_gerados": sum(1 for p in tl.planos if not p.asset_id and p.id not in ids_3d and p.fundo.get("tipo") != "video"),
                          "transicoes": dict(Counter(p.transicao_entrada["tipo"] for p in tl.planos))},
             "assets": assets, "pendencias": gerenciador.pendencias, "falhas_download": gerenciador.falhas, "rede": estado_rede,
             "audio": {"narracao_rms_db": narr["rms_ativo_db"], "narracao_pico_db": narr["pico_db"], "fontes": stems["fontes"],
