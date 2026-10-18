@@ -1,0 +1,35 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+@font-face{font-family:Cinzel;font-weight:700;src:url(../motion/fonts/cinzel-latin-700-normal.woff2)}
+@font-face{font-family:Cinzel;font-weight:600;src:url(../motion/fonts/cinzel-latin-600-normal.woff2)}
+@font-face{font-family:Inter;font-weight:600;src:url(../motion/fonts/inter-latin-600-normal.woff2)}
+html,body{margin:0;background:#000}
+#c{position:relative;width:1920px;height:1080px;overflow:hidden}
+#c>*{position:absolute}
+#plate{left:0;top:0;width:1920px;height:1080px;filter:contrast(1.18) saturate(1.25) brightness(0.96)}
+/* luz do sol: halo quente + raios, somados (screen) */
+#halo{inset:0;background:radial-gradient(circle at 1450px 290px, rgba(255,246,220,0.95) 0px, rgba(255,214,140,0.75) 200px, rgba(255,160,70,0.35) 420px, rgba(255,120,40,0) 900px);mix-blend-mode:screen}
+#raios{inset:0;background:repeating-conic-gradient(from 3deg at 1450px 290px, rgba(255,222,160,0.20) 0deg 1.6deg, rgba(255,222,160,0) 1.6deg 6.5deg);
+  -webkit-mask-image:radial-gradient(circle at 1450px 290px, #000 120px, rgba(0,0,0,0.6) 520px, transparent 1100px), linear-gradient(180deg, #000 0px, #000 430px, transparent 560px);
+  -webkit-mask-composite:source-in;mask-composite:intersect;mix-blend-mode:screen}
+/* trevas à esquerda: o lado dos deuses antigos, escuro, contra a luz da cruz */
+#trevas{inset:0;background:linear-gradient(90deg, rgba(8,4,8,0.92) 0%, rgba(14,6,10,0.82) 30%, rgba(30,10,10,0.45) 52%, rgba(0,0,0,0) 68%)}
+#vinheta{inset:0;background:radial-gradient(ellipse at 62% 40%, rgba(0,0,0,0) 45%, rgba(0,0,0,0.55) 100%), linear-gradient(0deg, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0) 30%)}
+#raio{left:300px;top:-10px;width:420px;height:700px;opacity:0.55;filter:drop-shadow(0 0 10px rgba(170,200,255,0.9)) drop-shadow(0 0 30px rgba(120,150,255,0.6))}
+.t{font-family:Cinzel;font-weight:700;white-space:nowrap;line-height:1}
+#jesus{left:84px;top:168px;font-size:262px;letter-spacing:0.03em;
+  background:linear-gradient(180deg,#fff6d2 0%,#ffd86e 38%,#e2a43a 62%,#9a6416 100%);-webkit-background-clip:text;background-clip:text;color:transparent;
+  -webkit-text-stroke:3px rgba(60,30,4,0.85);filter:drop-shadow(0 8px 22px rgba(0,0,0,0.9)) drop-shadow(0 0 40px rgba(255,190,90,0.35))}
+#contra{left:92px;top:450px;font-size:112px;letter-spacing:0.05em;color:#fff7ea;filter:drop-shadow(0 6px 16px rgba(0,0,0,0.95))}
+#deuses{left:92px;top:570px;font-size:112px;letter-spacing:0.05em;color:#fff7ea;filter:drop-shadow(0 6px 16px rgba(0,0,0,0.95))}
+#regra{left:96px;top:714px;width:620px;height:5px;background:linear-gradient(90deg,#ffd86e,rgba(255,216,110,0))}
+#selo{left:92px;top:756px;padding:18px 34px 20px;background:linear-gradient(180deg,#b3261e,#7d1410);border:3px solid #ffcf6a;border-radius:14px;
+  font-family:Inter;font-weight:600;font-size:56px;letter-spacing:0.04em;color:#fff;text-transform:uppercase;box-shadow:0 10px 30px rgba(0,0,0,0.7)}
+</style></head><body><div id="c">
+<img id="plate" src="placa.png">
+<div id="halo"></div><div id="raios"></div><div id="trevas"></div><div id="vinheta"></div>
+<div class="t" id="jesus">JESUS</div>
+<div class="t" id="contra">CONTRA TODOS</div>
+<div class="t" id="deuses">OS DEUSES</div>
+<div id="regra"></div>
+<div id="selo">Por que Ele é único?</div>
+</div></body></html>

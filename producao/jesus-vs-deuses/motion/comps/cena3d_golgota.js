@@ -6,13 +6,14 @@
 import * as THREE from 'three';
 import { iniciar3D } from '../engine/base3d.js';
 import { criarCeu, criarSol, criarPoeira3D, criarTrilho, criarFeixe } from '../engine/cena3d.js';
-import { caixa, material, malha, terreno, rochedo as pedra } from '../engine/arq.js';
+import { caixa, material, malha, terreno, rochedo as pedra, obelisco, colunaPapiro, temploDorico } from '../engine/arq.js';
 import { rngFor } from '../engine/rng.js';
 import * as tex from '../engine/tex.js';
 import { smooth } from '../engine/ease.js';
 
 const norm = (v) => { const l = Math.hypot(...v); return v.map((x) => x / l); };
-const TOPO = [0, -60];                                    // centro do cume (x, z)
+const TOPO = [0, -60];
+const ESC_CRUZ_CAPA = 1.3;                                    // centro do cume (x, z)
 
 
 function cruz({ alt, larg, mats, seed, titulo = false }) {
@@ -57,6 +58,12 @@ const VISTAS = {
     trilho: { pos: [[-26, 15.5, 8], [-12, 16.5, 2], [6, 17.5, 4]], alvo: [[-2, 23, -60], [0, 23.5, -60], [2, 23.5, -60]], fov: [30, 28] },
     poeira: { n: 500, vel: [0.25, 0.06, 0.1], op: 0.8 }, feixes: 4,
   },
+  capa: {        // capa do vídeo: câmera baixa na encosta, o sol nascendo atrás da cruz central, tempestade se abrindo
+    ceu: { hor: 0xff8a3a, meio: 0x8a3a3a, zen: 0x0c0e1c, baixo: 0x1a1210, sol: 0xffa850, expo: 0.5, brilho: 0.55, nuvens: 1.0, cobertura: 0.7, nuvem: 0xff9a5a, nuvemSombra: 0x120e16, disco: 0.55 },
+    paraSol: [0.27, 0.36, -0.89], sol: [0xffb878, 3.2], hemi: [0x5a4a68, 0x1e1410, 0.28], nevoa: [0x5a3028, 0.0026], exposicao: 0.9,
+    trilho: { pos: [[-10, 12.5, -28], [-10, 12.5, -28]], alvo: [[-13, 22.5, -61], [-13, 22.5, -61]], fov: [30, 30] },
+    poeira: { n: 600, vel: [0.3, 0.05, 0.1], op: 0.9 }, feixes: 6,
+  },
   distante: {
     ceu: { hor: 0xe49a62, meio: 0x86728a, zen: 0x283050, baixo: 0x3a3028, sol: 0xffc08a, expo: 0.5, brilho: 1.1, nuvens: 0.85, cobertura: 0.55, nuvem: 0xd8a890, nuvemSombra: 0x3a3448 },
     paraSol: [-0.62, 0.12, -0.78], sol: [0xffbe8a, 3.0], hemi: [0x8a8aa8, 0x4a3a2e, 0.75], nevoa: [0x9a8478, 0.0026], exposicao: 1.0,
@@ -71,8 +78,7 @@ const def = {
     const seed = spec.seed ?? 1;
     const V = VISTAS[P.vista] ?? VISTAS.tempestade;
     r.toneMappingExposure = V.exposicao;
-    const paraSol = norm(V.paraSol);
-    const ceu = criarCeu({ ...V.ceu, sunDir: paraSol });
+    let paraSol = norm(V.paraSol);
     cena.fog = new THREE.FogExp2(V.nevoa[0], V.nevoa[1]);
 
     const tRocha = tex.rocha({ tam: 1024, semente: 131, base: [150, 136, 116] });
@@ -144,10 +150,22 @@ const def = {
 
     // as três cruzes (a do centro mais alta, com a placa do título), no cume
     const yTopo = altura(TOPO[0], TOPO[1]);
+    // capa: câmera 1,7 m acima do chão e o sol exatamente atrás do cruzamento da cruz central
+    let T = V.trilho, camCapa = null;
+    if (P.vista === 'capa') {
+      const cx = P.capa?.cam?.[0] ?? -22, cz = P.capa?.cam?.[1] ?? 48, cy = altura(cx, cz) + (P.capa?.cam?.[2] ?? 2.5);     // fora do campo de pedras: lente longa
+      const al = P.capa?.alvo ?? [-12, yTopo + 1.5, -61];
+      T = { ...T, pos: [[cx, cy, cz], [cx, cy, cz]], alvo: [al, al], fov: [P.capa?.fov ?? 12, P.capa?.fov ?? 12] }; camCapa = [cx, cy, cz];
+      const alvoSol = [TOPO[0] - cx, yTopo + ESC_CRUZ_CAPA * (6.6 * 0.74 - 0.6) - cy, TOPO[1] - 1.2 - cz];
+      paraSol = norm(alvoSol);
+    }
+    const ceu = criarCeu({ ...V.ceu, sunDir: paraSol });
+    if (camCapa) ceu.malha.position.set(...camCapa);         // céu centrado na câmera: o sol fica exatamente atrás da cruz (sem paralaxe da cúpula)
     for (const [dx, alt, sd, tit] of [[-5.2, 5.4, 1, false], [0, 6.6, 2, true], [5.4, 5.3, 3, false]]) {
       const c = cruz({ alt, larg: 2.4, mats, seed: seed * 10 + sd, titulo: tit });
       const x = TOPO[0] + dx, z = TOPO[1] + (dx === 0 ? -1.2 : 0.6);
       c.position.set(x, altura(x, z) - 0.15, z);
+      if (P.vista === 'capa') c.scale.setScalar(ESC_CRUZ_CAPA);                         // na capa as cruzes precisam ler em miniatura
       cena.add(c);
     }
 
@@ -167,7 +185,6 @@ const def = {
     const poeira = criarPoeira3D({ semente: seed, n: V.poeira.n, caixa: [-40, yTopo - 8, TOPO[1] - 40, 40, yTopo + 18, 40], vel: V.poeira.vel, cor: 0xffe0b8, tam: 2.4, op: V.poeira.op });
     cena.add(poeira);
 
-    const T = V.trilho;
     const trilho = criarTrilho({ pos: T.pos, alvo: T.alvo, fov: T.fov, curva: (x) => 0.35 * x + 0.65 * smooth(x) });
     return {
       ceu, trilho, ibl: 0.8, vinheta: 0.55, poeiraTela: 0,

@@ -1,0 +1,2 @@
+{"largura": 1920, "altura": 1080, "fps": 30, "render3d": {"escala": 1.0, "msaa": true}, "clipes": [
+ {"id": "capa", "comp": "cena3d_golgota", "dur": 1.0, "seed": 5, "params": {"vista": "capa", "capa": {"fov": 10.5, "alvo": [-9.5, 24.0, -61]}, "hud": {"desligado": true}}, "saida": "x"}]}
