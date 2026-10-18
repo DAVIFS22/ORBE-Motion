@@ -45,7 +45,7 @@ const def = {
   render: { exposicao: 1.0 },
   async montar({ cena, P, spec, r }) {
     const seed = spec.seed ?? 1;
-    r.toneMappingExposure = 1.1;
+    r.toneMappingExposure = 1.3;
     cena.background = new THREE.Color(0x0a0806);
     cena.fog = new THREE.FogExp2(0x0e0906, 0.22);
 
@@ -58,7 +58,7 @@ const def = {
       parede: material(tPedra, { rep: [1, 1], normal: 1.0, rug: 1, env: 0.2, cor: 0x7a6a58 }),
       barro: material(tBarro, { rep: [1, 1], normal: 0.6, rug: 0.85, env: 0.3 }),
       rolo: new THREE.MeshStandardMaterial({ map: texturaRolo(seed + 7), roughness: 0.92, side: THREE.DoubleSide }),
-      verso: new THREE.MeshStandardMaterial({ color: 0xc8b088, roughness: 0.95 }),
+      verso: new THREE.MeshStandardMaterial({ color: 0xa48c68, roughness: 0.97 }),
     };
 
     // sala: piso, parede ao fundo e à esquerda (pedra), mesa
@@ -72,7 +72,7 @@ const def = {
     const Lf = 1.25, Hf = 0.36;
     const folha = new THREE.PlaneGeometry(Lf, Hf, 80, 12); folha.rotateX(-Math.PI / 2);
     { const p = folha.attributes.position; for (let i = 0; i < p.count; i++) { const x = p.getX(i), z = p.getZ(i); p.setY(i, 0.006 * Math.sin(x * 9) + 0.012 * Math.pow(Math.abs(z) / (Hf / 2), 4) + 0.03 * Math.pow(Math.abs(x) / (Lf / 2), 6)); } folha.computeVertexNormals(); }
-    const rolo = new THREE.Group(); rolo.position.set(0.2, 0.785, -0.08); rolo.rotation.y = -0.08;
+    const rolo = new THREE.Group(); rolo.position.set(0.05, 0.785, -0.06); rolo.rotation.y = -0.08;
     rolo.add(malha(folha, mats.rolo));
     for (const s of [-1, 1]) {
       const cil = new THREE.CylinderGeometry(0.058, 0.058, Hf + 0.01, 32); cil.rotateX(Math.PI / 2);
@@ -91,13 +91,16 @@ const def = {
     const gChama = new THREE.SphereGeometry(0.007, 16, 12); gChama.scale(1, 2.6, 1); gChama.translate(0, 0.016, 0);       // chama em gota
     const chama = new THREE.Mesh(gChama, new THREE.MeshBasicMaterial({ color: 0xffe2a8 }));
     chama.position.set(1.24, 0.818, -0.42); cena.add(chama);
-    const halo = new THREE.Mesh(new THREE.SphereGeometry(0.02, 16, 12), new THREE.MeshBasicMaterial({ color: 0xff9a40, transparent: true, opacity: 0.25, blending: THREE.AdditiveBlending, depthWrite: false }));
+    const halo = new THREE.Mesh(new THREE.SphereGeometry(0.011, 16, 12), new THREE.MeshBasicMaterial({ color: 0xff9a40, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false }));
     halo.position.copy(chama.position).add(new THREE.Vector3(0, 0.016, 0)); cena.add(halo);
 
-    const luz = new THREE.PointLight(0xffb060, 2.9, 6, 1.5); luz.position.set(1.24, 0.86, -0.42); luz.castShadow = true;
+    const luz = new THREE.PointLight(0xffb060, 4.2, 7, 1.15); luz.position.set(1.24, 0.86, -0.42); luz.castShadow = true;
     luz.shadow.mapSize.set(2048, 2048); luz.shadow.bias = -0.0015; luz.shadow.radius = 6; cena.add(luz);
-    const janela = new THREE.DirectionalLight(0x6a86c8, 0.35); janela.position.set(-2, 3, 2); cena.add(janela);
-    cena.add(new THREE.HemisphereLight(0x3a3a50, 0x1a120c, 0.28));
+    // luz de janela (fora de quadro, à esquerda): recorta o rolo e a mesa com sombra suave, sem tirar o protagonismo da lamparina
+    const janela = new THREE.DirectionalLight(0xffe6c8, 1.25); janela.position.set(-2.2, 2.6, 1.6); janela.target.position.set(0.1, 0.78, -0.1);
+    janela.castShadow = true; janela.shadow.mapSize.set(2048, 2048); Object.assign(janela.shadow.camera, { left: -2, right: 2, top: 2, bottom: -2, near: 0.5, far: 8 });
+    janela.shadow.bias = -0.0008; janela.shadow.radius = 5; cena.add(janela, janela.target);
+    cena.add(new THREE.HemisphereLight(0x4a4a60, 0x22180f, 0.4));
     const poeira = criarPoeira3D({ semente: seed, n: 140, caixa: [-0.6, 0.8, -0.7, 1.4, 1.8, 0.6], vel: [0.008, 0.004, 0.006], cor: 0xffd8a8, tam: 0.12, op: 0.5 });
     cena.add(poeira);
 
@@ -108,7 +111,7 @@ const def = {
       eventos: [],
       atualizar(t) {
         const f = 1 + 0.06 * Math.sin(t * 9.1) + 0.04 * Math.sin(t * 15.7 + 1.3) + 0.03 * Math.sin(t * 23.3 + 0.4);   // a chama tremula (função de t)
-        luz.intensity = 2.6 * f; chama.scale.set(1, 0.9 + 0.12 * Math.sin(t * 11.3), 1); halo.material.opacity = 0.3 * f;
+        luz.intensity = 2.6 * f; chama.scale.set(1, 0.9 + 0.12 * Math.sin(t * 11.3), 1); halo.material.opacity = 0.16 * f;
         poeira.material.uniforms.uT.value = t;
       },
     };

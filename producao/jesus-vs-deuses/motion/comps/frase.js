@@ -25,7 +25,9 @@ export const frase = {
     const cv = canvas(W, H, {}, raiz); const g = cv.getContext('2d');
     g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
     const img = P.imagem ? await carregarImagem(P.imagem) : null;
-    const cam = Object.assign({ s0: 1.03, s1: 1.09, x0: 0, x1: dir ? 26 : -26, y0: 0, y1: -8 }, P.camera || {});
+    // o fundo é ampliado e deslocado para o lado oposto ao texto: o assunto da imagem sai de baixo das letras
+    const lado = dir ? -1 : 1;
+    const cam = Object.assign({ s0: 1.2, s1: 1.25, x0: lado * 165, x1: lado * 185, y0: 0, y1: -8 }, P.camera || {});
     const scrim = el('div', { left: '0', top: '0', width: W + 'px', height: H + 'px',
       background: `linear-gradient(${dir ? 270 : 90}deg, rgba(5,6,9,0.80) 0%, rgba(5,6,9,0.62) 30%, rgba(5,6,9,0.18) 56%, rgba(5,6,9,0) 70%)` }, raiz);
 

@@ -44,16 +44,17 @@ _GRE = "templo dórico inspirado no Templo de Zeus em Olímpia (reconstrução a
 _FIO = "fiorde nórdico (paisagem artística; não é um local real nem mostra o evento mitológico)"
 
 _BASE = {   # (comp, vista, descrição) -> posições no trilho; cada posição vira um still diferente (outro ponto de vista)
-    "galileia_lago": ("cena3d_galileia", "lago", _GAL, (0.1, 0.4, 0.7, 1.0)),
+    "galileia_lago": ("cena3d_galileia", "lago", _GAL, (0.05, 0.25, 0.45, 0.65, 0.85, 1.0)),
     "galileia_margem": ("cena3d_galileia", "margem", _GAL, (0.15, 0.55, 0.95)),
     "galileia_colinas": ("cena3d_galileia", "colinas", _GAL, (0.2, 0.6, 1.0)),
-    "galileia_noite": ("cena3d_galileia", "noite", _GAL + ", à noite", (0.1, 0.45, 0.8, 1.0)),
+    "galileia_noite": ("cena3d_galileia", "noite", _GAL + ", à noite", (0.05, 0.3, 0.55, 0.8, 1.0)),
+    "galileia_colinas_noite": ("cena3d_galileia", "colinas_noite", _GAL + ", à noite, vista da encosta", (0.05, 0.35, 0.65, 1.0)),
     "golgota_tempestade": ("cena3d_golgota", "tempestade", _GOL, (0.2, 0.5, 0.75, 1.0)),
-    "golgota_amanhecer": ("cena3d_golgota", "amanhecer", _GOL + ", ao amanhecer", (0.1, 0.4, 0.7, 1.0)),
+    "golgota_amanhecer": ("cena3d_golgota", "amanhecer", _GOL + ", ao amanhecer", (0.05, 0.25, 0.45, 0.65, 0.85, 1.0)),
     "golgota_distante": ("cena3d_golgota", "distante", _GOL + ", com a muralha ao fundo", (0.2, 0.8)),
     "tumulo_interior": ("cena3d_tumulo", "interior", _TUM, (0.3, 0.7, 1.0)),
     "tumulo_saida": ("cena3d_tumulo", "saida", _TUM, (0.2, 0.6, 1.0)),
-    "tumulo_exterior": ("cena3d_tumulo", "exterior", _TUM, (0.6, 0.95)),
+    "tumulo_exterior": ("cena3d_tumulo", "exterior", _TUM, (0.15, 0.5, 0.9)),
     "escritos_mesa": ("cena3d_escritos", "mesa", _ESC, (0.1, 0.4, 0.7, 1.0)),
     "escritos_lamparina": ("cena3d_escritos", "lamparina", _ESC, (0.2, 0.6, 1.0)),
     "escritos_rolo": ("cena3d_escritos", "rolo", _ESC, (0.2, 0.6, 1.0)),
@@ -70,19 +71,19 @@ VARIACOES = {nome: [f"{nome}_{k}" for k in range(len(v[3]))] for nome, v in _BAS
 
 # (seção, cenário pedido) -> grupos de stills; (None, cenário) vale para qualquer seção. Cenários ausentes continuam como estão.
 _LUZ = {
-    "3-identidade": ["galileia_lago", "galileia_noite", "judeia_telhados", "escritos_lamparina"],
+    "3-identidade": ["galileia_lago", "galileia_colinas_noite", "judeia_telhados", "escritos_lamparina", "galileia_noite"],
     "4-amor": ["galileia_margem", "galileia_colinas", "judeia_viela", "galileia_lago"],
     "5-morte": ["tumulo_interior", "golgota_amanhecer", "escritos_lamparina"],
     "6-crucificacao": ["golgota_tempestade", "golgota_distante", "escritos_mesa"],
     "7-ressurreicao": ["tumulo_saida", "golgota_amanhecer", "galileia_lago"],
     "8-comparacao": ["galileia_noite", "golgota_amanhecer", "tumulo_saida", "escritos_mesa"],
-    "9-encerramento": ["galileia_lago", "galileia_noite", "golgota_amanhecer", "judeia_telhados"],
+    "9-encerramento": ["galileia_lago", "galileia_colinas_noite", "golgota_amanhecer", "judeia_telhados", "galileia_noite"],
 }
 _GRUPOS: dict[tuple[str | None, str], list[str]] = {
     **{(s, "luz_dourada"): v for s, v in _LUZ.items()},
     (None, "pergaminho"): ["escritos_mesa", "escritos_rolo", "escritos_lamparina"],
-    (None, "cosmos"): ["galileia_noite"],
-    (None, "ceu_estrelado"): ["galileia_noite"],
+    (None, "cosmos"): ["galileia_colinas_noite", "galileia_noite"],
+    (None, "ceu_estrelado"): ["galileia_noite", "galileia_colinas_noite"],
     (None, "mar_galileia"): ["galileia_lago", "galileia_margem", "galileia_colinas"],
     (None, "aldeia"): ["judeia_viela", "judeia_telhados"],
     (None, "cruz_colina"): ["golgota_tempestade", "golgota_distante"],

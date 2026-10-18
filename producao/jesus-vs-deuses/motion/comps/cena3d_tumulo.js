@@ -66,7 +66,7 @@ function linho(w, d, seed) {                               // pano de linho com 
 const VISTAS = {
   exterior: {
     ceu: { hor: 0xffc08a, meio: 0xc8c4d8, zen: 0x5a7cb0, baixo: 0x6a5844, sol: 0xffd6a0, expo: 0.45, brilho: 1.2, nuvens: 0.55, cobertura: 0.32, nuvem: 0xffe4c8, nuvemSombra: 0x8a8098 },
-    paraSol: [-0.86, 0.26, 0.44], sol: [0xffd0a0, 4.6], hemi: [0xa8b8d8, 0x6a5a44, 0.85], ibl: 0.9, nevoa: [0xe8cdb0, 0.006], exposicao: 0.95,
+    paraSol: [-0.93, 0.27, 0.25], sol: [0xffd0a0, 5.4], hemi: [0xa8b8d8, 0x6a5a44, 0.5], ibl: 0.55, nevoa: [0xe8cdb0, 0.006], exposicao: 0.98,   // sol rasante: revela o relevo da rocha
     trilho: { pos: [[-5.5, 1.1, 15], [-3.2, 1.0, 10.5], [-1.4, 0.95, 6.2]], alvo: [[1.2, 2.4, 0], [1.0, 1.7, 0], [0.6, 1.2, -1]], fov: [46, 40] },
     feixes: false,
   },
@@ -95,7 +95,7 @@ const def = {
     cena.fog = new THREE.FogExp2(V.nevoa[0], V.nevoa[1]);
 
     const tCal = tex.calcario({ tam: 1024, semente: 151, base: [214, 200, 172] });
-    const tTerra = tex.terra({ tam: 1024, semente: 152, base: [116, 106, 74], seixos: 0.4 });
+    const tTerra = tex.terra({ tam: 1024, semente: 152, base: [116, 106, 74], seixos: 0.12 });
     const tMad = tex.madeira({ tam: 512, semente: 153, base: [92, 66, 44] });
     const tPano = tex.pano({ tam: 512, semente: 154, cores: [[226, 218, 198], [214, 206, 186]], listras: 1 });
     const mats = {
@@ -158,7 +158,7 @@ const def = {
     const chao = terreno({ larg: 180, prof: 160, nx: 140, nz: 120, centro: [0, 70], esc: 0.22,
       altura: (x, z) => 0.25 * N.fbm(x * 0.05, z * 0.05, 4) * smooth(Math.min(1, z / 3)) + 0.004 * z * z * 0.02,
       cor: (x, y, z) => { const verde = 0.5 + 0.5 * N.fbm(x * 0.07 + 20, z * 0.07, 4); const caminho = Math.exp(-Math.pow((x - 0.6 + 0.1 * z) / 1.3, 2)) * (z > 0.8 ? 1 : 0);
-        return [0.82 - 0.18 * verde + 0.15 * caminho, 0.8 + 0.06 * verde + 0.08 * caminho, 0.62 - 0.12 * verde + 0.12 * caminho]; } });
+        return [0.9 - 0.14 * verde + 0.08 * caminho, 0.84 + 0.0 * verde + 0.06 * caminho, 0.7 - 0.14 * verde + 0.1 * caminho]; } });      // capim ralo sobre terra, não gramado
     cena.add(malha(chao, mats.chao, { sombra: false }));
     const rr = rngFor(seed, 31);
     for (const [x, z, h, sd] of [[-9, 9, 4.6, 1], [7.5, 13, 4.2, 2], [-15, 22, 5.0, 3], [12, 25, 4.8, 4], [-3.2, 17, 4.4, 5], [17, 7, 3.8, 6], [-22, 6, 4.4, 7], [2.8, 24, 4.6, 8]]) {
@@ -181,7 +181,7 @@ const def = {
       const d = [-paraSol[0], -paraSol[1], -paraSol[2]];
       for (let i = 0; i < 2; i++) { const f = criarFeixe({ origem: [0.0 + (i - 0.5) * 0.4 - d[0] * 1.5, 1.2 - d[1] * 1.5, 0.6 - d[2] * 1.5], dir: d, comp: 6, larg: 0.9, cor: 0xffe2b8, op: 0.09, esp: 1.6, fase: i * 2 }); cena.add(f); feixes.push(f); }
     }
-    const poeira = criarPoeira3D({ semente: seed, n: P.vista === 'exterior' ? 260 : 260, caixa: P.vista === 'exterior' ? [-8, 0.2, -1, 8, 6, 24] : [-1.8, 0.1, -4, 1.8, 2.2, 1.5], vel: [0.05, 0.02, 0.03], cor: 0xffe6c0, tam: P.vista === 'exterior' ? 1.4 : 0.22, op: 0.7 });
+    const poeira = criarPoeira3D({ semente: seed, n: P.vista === 'exterior' ? 150 : 260, caixa: P.vista === 'exterior' ? [-8, 0.2, -1, 8, 6, 24] : [-1.8, 0.1, -4, 1.8, 2.2, 1.5], vel: [0.05, 0.02, 0.03], cor: 0xffe6c0, tam: P.vista === 'exterior' ? 0.6 : 0.22, op: 0.7 });
     cena.add(poeira);
 
     const T = V.trilho;

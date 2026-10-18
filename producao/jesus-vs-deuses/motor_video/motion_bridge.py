@@ -184,8 +184,8 @@ def montar_params(conteudo_id: str, plano, al: sa.Alinhamento | None, batidas: l
         params["sincronia"] = {"palavras": sum(len(x) for x in linhas), "no_alinhamento": achadas}
         # corte interno para um enquadramento mais fechado quando a segunda linha começa (se houver tempo para os dois)
         if len(linhas) >= 2 and plano.duracao >= 5.0 and 1.6 <= linhas[1][0]["t"] <= plano.duracao - 1.6:
-            dx = 110 if params.get("lado") == "dir" else -110
-            params["camera"] = {"corte": {"t": linhas[1][0]["t"], "s": 1.28, "x": dx, "y": 24}}
+            dx = -210 if params.get("lado") == "dir" else 210              # mais perto, e o assunto continua longe do texto
+            params["camera"] = {"corte": {"t": linhas[1][0]["t"], "s": 1.34, "x": dx, "y": 24}}
     params["batidas"] = [round(b - plano.inicio, 4) for b in batidas if plano.inicio - 0.01 <= b <= plano.fim + 0.01]
     return params
 

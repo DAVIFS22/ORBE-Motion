@@ -587,15 +587,15 @@ export function barcoPesca({ L = 8.2, B = 2.3, D = 1.15, mats, mastro = true, re
 export function bosque({ pontos, mats, seed = 1 }) {
   const N = criarRuido(seed * 7 + 3), r = rngFor(seed, 17);
   const partes = [];
-  for (let i = 0; i < 6; i++) {
-    const a = r() * TAU, d = 0.3 + r() * 1.0, s = 0.75 + r() * 0.5;
+  for (let i = 0; i < 11; i++) {                                             // copa em domo baixo e denso, em tufos (silhueta de oliveira)
+    const a = r() * TAU, d = 0.3 + r() * 1.05, s = 0.7 + r() * 0.5, yy = 1.75 + r() * 1.0;
     const c = esferaSuave(2); const q = c.attributes.position;
-    for (let k = 0; k < q.count; k++) { const x = q.getX(k), y = q.getY(k), z = q.getZ(k), f = 0.75 + 0.45 * N.fbm(x * 1.7 + i, z * 1.7 + y, 3); q.setXYZ(k, x * f * s + Math.cos(a) * d, y * f * s * 0.6 + 2.9 + r() * 0.6, z * f * s + Math.sin(a) * d); }
+    for (let k = 0; k < q.count; k++) { const x = q.getX(k), y = q.getY(k), z = q.getZ(k), f = 0.7 + 0.5 * N.fbm(x * 1.9 + i, z * 1.9 + y, 3); q.setXYZ(k, x * f * s * 1.15 + Math.cos(a) * d, y * f * s * 0.85 + yy, z * f * s * 1.15 + Math.sin(a) * d); }
     partes.push(c);
   }
   partes.forEach((g) => finalizarSuave(g));
   const copa = mergeGeometries(partes);
-  const tronco = new THREE.CylinderGeometry(0.13, 0.22, 3.0, 7); tronco.translate(0, 1.5, 0);
+  const tronco = new THREE.CylinderGeometry(0.17, 0.32, 2.0, 7); tronco.translate(0, 1.0, 0);
   const iC = new THREE.InstancedMesh(copa, mats.folha, pontos.length), iT = new THREE.InstancedMesh(tronco, mats.madeira, pontos.length);
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
   pontos.forEach(([x, y, z, esc, rot], i) => { e.set(0, rot, 0); q.setFromEuler(e); m4.compose(new THREE.Vector3(x, y, z), q, new THREE.Vector3(esc, esc, esc)); iC.setMatrixAt(i, m4); iT.setMatrixAt(i, m4); });

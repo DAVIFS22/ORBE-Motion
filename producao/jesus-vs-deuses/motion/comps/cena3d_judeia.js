@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { iniciar3D } from '../engine/base3d.js';
 import { criarCeu, criarSol, criarPoeira3D, criarTrilho } from '../engine/cena3d.js';
-import { casaJudeia, banca, anfora, oliveira, caixa, material, malha, terreno, revolucao } from '../engine/arq.js';
+import { casaJudeia, banca, anfora, oliveira, caixa, material, malha, terreno, revolucao, bosque } from '../engine/arq.js';
 import { rngFor } from '../engine/rng.js';
 import * as tex from '../engine/tex.js';
 import { smooth } from '../engine/ease.js';
@@ -49,7 +49,8 @@ const def = {
     const seed = spec.seed ?? 1;
     const paraSol = norm([0.5, 0.3, -0.8]);                  // contraluz baixo, à direita e à frente da viela
     const ceu = criarCeu({ hor: 0xffcf94, meio: 0xa8c4e4, zen: 0x3b72b8, baixo: 0x7a6a50, sol: 0xffd9a0, sunDir: paraSol, expo: 0.4, brilho: 1.3, nuvens: 0.55, cobertura: 0.28, nuvem: 0xfff0d8, nuvemSombra: 0x9a9ab8 });
-    cena.fog = new THREE.FogExp2(0xe6c196, 0.0085);
+    const alto = P.vista === 'telhados';                     // do alto, a névoa abre para mostrar as colinas e as casas da encosta
+    cena.fog = alto ? new THREE.FogExp2(0xc4c4b8, 0.0023) : new THREE.FogExp2(0xe6c196, 0.0085);
 
     const tReb1 = tex.reboco({ tam: 1024, semente: 81, base: [216, 200, 168], remendos: 0.55 });
     const tReb2 = tex.reboco({ tam: 1024, semente: 83, base: [204, 184, 150], remendos: 0.7 });
@@ -66,7 +67,7 @@ const def = {
       porta: material(tMad, { rep: [1, 1], normal: 0.9, rug: 0.9, cor: 0xa08064 }),
       toldo: material(tPano[0], { rep: [1, 1], normal: 0.4, rug: 1 }),
       barro: material(tTerra, { rep: [2, 2], normal: 0.6, rug: 0.95, cor: 0xd29868 }),
-      folha: new THREE.MeshStandardMaterial({ color: 0x7a8a5a, roughness: 0.9 }),
+      folha: new THREE.MeshStandardMaterial({ color: 0x707a50, roughness: 0.9 }),
       pano: tPano.map((t) => material(t, { rep: [1, 1], normal: 0.3, rug: 1 })),
     };
     const mReb2 = material(tReb2, { rep: [1, 1], normal: 1.1, rug: 1, env: 0.6 });
@@ -74,9 +75,17 @@ const def = {
     // viela de terra batida (leve ondulação) e terreno em socalcos ao fundo
     const R = tex.criarRuido(seed + 120);
     const mTerra = material(tTerra, { rep: [1, 1], normal: 1.2, rug: 1, env: 0.8, cor: 0xf0d8b0 });
-    const chao = terreno({ larg: 520, prof: 700, nx: 130, nz: 160, centro: [0, -230], esc: 0.2,
-      altura: (x, z) => { const ax = Math.abs(x); const dentro = ax < 4.5 ? 0 : Math.min(1, (ax - 4.5) / 6); const fundo = Math.max(0, -z - 70);
-        return -0.0 + 0.1 * R.fbm(x * 0.4, z * 0.4, 3) * (1 - dentro) + dentro * (2.4 * R.fbm(x * 0.03, z * 0.03, 4) + 9 * Math.pow(Math.min(1, fundo / 250), 1.4) * (0.5 + R.fbm(x * 0.012, z * 0.012, 4))) - 0.12 * Math.sin(ax * 0.9) * dentro; } });
+    // colinas: suaves junto da aldeia e mais altas ao fundo (a aldeia fica num vale, como as da Baixa Galileia)
+    const alt = (x, z) => { const ax = Math.abs(x); const dentro = ax < 4.5 ? 0 : Math.min(1, (ax - 4.5) / 6); const fundo = Math.max(0, -z - 70), lateral = Math.max(0, ax - 60);
+      const campo = Math.max(dentro, smooth(Math.min(1, fundo / 60)));                           // fora da aldeia a estrada sobe com o terreno
+      return 0.1 * R.fbm(x * 0.4, z * 0.4, 3) * (1 - dentro) + campo * (2.4 * R.fbm(x * 0.03, z * 0.03, 4) + 9 * Math.pow(Math.min(1, fundo / 250), 1.4) * (0.5 + R.fbm(x * 0.012, z * 0.012, 4))
+        + (alto ? 38 * Math.pow(Math.min(1, (fundo + lateral * 0.8) / 420), 1.3) * (0.45 + 0.8 * R.fbm(x * 0.006 + 4, z * 0.006, 4)) : 0)) - 0.12 * Math.sin(ax * 0.9) * dentro; };
+    // do alto: calcário com capim seco e manchas de mato verde-acinzentado fora da aldeia (não um deserto de areia)
+    const corCampo = alto ? (x, y, z) => { const fora = smooth(Math.min(1, Math.max(0, (Math.abs(x) - 44) / 30, (-z - 120) / 40)));
+      const v = R.fbm(x * 0.02 + 11, z * 0.02, 4), mato = smooth(Math.min(1, Math.max(0, v - 0.4) * 3));
+      return [1 - fora * (0.3 + 0.12 * mato), 1 - fora * (0.16 + 0.06 * mato), 1 - fora * (0.3 + 0.08 * mato)]; } : null;
+    if (alto) mTerra.vertexColors = true;
+    const chao = terreno({ larg: alto ? 1400 : 520, prof: alto ? 1200 : 700, nx: alto ? 220 : 130, nz: alto ? 220 : 160, centro: [0, alto ? -480 : -230], esc: 0.2, altura: alt, cor: corCampo });
     cena.add(malha(chao, mTerra, { sombra: false }));
 
     // casas dos dois lados da viela (portas voltadas para a viela), alturas e larguras variadas
@@ -106,8 +115,30 @@ const def = {
     for (const [x, z, h, sd] of [[-7, -104, 4.6, 1], [6.5, -112, 4.2, 2], [-13, -126, 5.0, 3], [14, -132, 4.4, 4], [0, -150, 5.2, 5], [-26, -170, 4.8, 6], [25, -178, 4.6, 7]]) {
       const o = oliveira({ h, mats, seed: sd }); o.position.set(x, 0, z); cena.add(o);
     }
+    if (alto) {
+      // do alto se vê a aldeia inteira: mais casas em fileiras irregulares nas duas encostas, voltadas para a viela
+      for (const lado of [-1, 1]) for (let fila = 0; fila < 3; fila++) {
+        let z = 18 - r() * 6;
+        while (z > -110) {
+          const w = 4.6 + r() * 3, d = 4.6 + r() * 2.4, andares = r() < 0.2 ? 2 : 1, x = lado * (15 + fila * 10.5 + r() * 3);
+          if (r() < 0.22) { z -= w + 3; continue; }                                          // quintais e falhas entre as casas
+          const c = casaJudeia({ w, d, h: 3 + r() * 0.5, andares, escada: andares === 2, porta: false, mats: { ...mats, reboco: [mats.reboco, mReb2, mats.reboco, mReb2, mats.pedra][Math.floor(r() * 5)] }, seed: seed * 300 + fila * 40 + Math.round(-z) + (lado > 0 ? 7 : 0) });
+          c.position.set(x, alt(x, z - w / 2) - 0.25, z - w / 2); c.rotation.y = (lado > 0 ? -Math.PI / 2 : Math.PI / 2) + (r() - 0.5) * 0.12;
+          casas.add(c); z -= w + 0.6 + r() * 2.2;
+        }
+      }
+      // olivais em socalcos nas encostas e no fundo do vale
+      const pts = [];
+      for (let i = 0; i < 900; i++) {
+        const x = (r() - 0.5) * 520, z = 30 - r() * 520;
+        if (Math.abs(x) < 50 && z > -120) continue;                                          // a aldeia
+        if (R.fbm(x * 0.012 + 7, z * 0.012, 3) < 0.45) continue;                             // manchas de olival, não um tapete
+        pts.push([x, alt(x, z) - 0.1, z, 0.8 + r() * 0.5, r() * 6]);
+      }
+      cena.add(bosque({ pontos: pts, mats, seed }));
+    }
 
-    const sol = criarSol({ cor: 0xffd49a, intensidade: 5.4, dir: paraSol, alvo: [0, 3, -45], dist: 150, caixa: 60, mapa: 4096, bias: -0.0003, normalBias: 0.06, near: 20, far: 320 });
+    const sol = criarSol({ cor: 0xffd49a, intensidade: 5.4, dir: paraSol, alvo: [0, 3, -45], dist: 150, caixa: alto ? 120 : 60, mapa: 4096, bias: -0.0003, normalBias: 0.06, near: 20, far: 320 });
     cena.add(sol, sol.target);
     cena.add(new THREE.HemisphereLight(0x9fb6e0, 0x8a6a48, 1.0));
     const poeira = criarPoeira3D({ semente: seed, n: 650, caixa: [-9, 0.3, -110, 9, 9, 16], vel: [0.12, 0.05, 0.1], cor: 0xffe2b0, tam: 1.8, op: 0.8 });
@@ -117,7 +148,7 @@ const def = {
     // fora da aldeia, entre as oliveiras, olhando de volta para as casas)
     const VISTAS = {
       viela: { pos: [[-1.3, 1.65, 12], [-0.6, 1.85, -6], [0.5, 2.3, -26], [0.9, 2.8, -48]], alvo: [[1.5, 2.7, -22], [0.8, 3.0, -42], [0.2, 3.2, -66], [0, 3.6, -100]], fov: [50, 40] },
-      telhados: { pos: [[9, 8.5, 22], [6, 9.5, 6], [3, 10.5, -10]], alvo: [[-3, 3, -30], [-2, 2.5, -55], [-1, 3, -85]], fov: [44, 38] },
+      telhados: { pos: [[16, 13, 30], [11, 14, 14], [6, 15, -2]], alvo: [[-4, 4, -40], [-3, 5, -70], [-2, 7, -110]], fov: [46, 40] },
       saida: { pos: [[3, 1.7, -150], [1.5, 1.8, -135], [0.5, 1.9, -122]], alvo: [[0, 3, -60], [0, 3, -50], [0, 3.2, -40]], fov: [40, 34] },
     };
     const VT = VISTAS[P.vista] ?? VISTAS.viela;

@@ -2,7 +2,8 @@
 // para a areia (escala do barco do século I achado em 1986), redes secando em varas, névoa sobre a água e as colinas da
 // outra margem contra o sol nascente. Não reproduz um ponto exato da margem; não mostra pessoas.
 // Vistas (params.vista): 'margem' (câmera baixa na praia, junto ao barco), 'lago' (rente à água, rumo a um barco ancorado),
-//                        'colinas' (do alto da encosta, o lago inteiro abaixo).
+//                        'colinas' (do alto da encosta, o lago inteiro abaixo), 'noite' (na beira d'água, lua e lamparina de um
+//                        barco de pesca) e 'colinas_noite' (da encosta, a lua sobre o lago).
 import * as THREE from 'three';
 import { iniciar3D } from '../engine/base3d.js';
 import { criarCeu, criarSol, criarPoeira3D, criarTrilho, criarNevoa } from '../engine/cena3d.js';
@@ -10,6 +11,15 @@ import { material, malha, terreno, rochedo, barcoPesca, texturaRede, oliveira, c
 import { rngFor } from '../engine/rng.js';
 import * as tex from '../engine/tex.js';
 import { smooth } from '../engine/ease.js';
+
+function brilho(op) {                              // brilho quente de chama (sprite aditivo, sempre de frente para a câmera)
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d'), gr = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gr.addColorStop(0, 'rgba(255,236,200,1)'); gr.addColorStop(0.12, 'rgba(255,184,96,0.8)'); gr.addColorStop(0.4, 'rgba(255,140,60,0.18)'); gr.addColorStop(1, 'rgba(255,120,40,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  return new THREE.Sprite(new THREE.SpriteMaterial({ map: t, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, opacity: op }));
+}
 
 const norm = (v) => { const l = Math.hypot(...v); return v.map((x) => x / l); };
 
@@ -35,9 +45,14 @@ const VISTAS = {
     trilho: { pos: [[-22, 1.1, -30], [-12, 1.2, -58], [-2, 1.3, -86]], alvo: [[18, 1.2, -128], [16, 1.4, -134], [14, 1.6, -140]], fov: [36, 30] },
   },
   noite: {
-    ceu: { hor: 0x2a3660, meio: 0x111a3c, zen: 0x04061a, baixo: 0x080a14, sol: 0xc8d4ff, expo: 0.6, brilho: 0.9, nuvens: 0, estrelas: 2.6, via: 2.8, disco: 1.0 },
-    paraSol: [-0.5, 0.32, -0.8], sol: [0x9fb4ff, 0.55], hemi: [0x4a5a8a, 0x1a1c24, 0.35], nevoa: [0x1a2238, 0.0007], exposicao: 1.15, noite: true,
-    trilho: { pos: [[-10, 1.4, 12], [-6, 1.5, 9], [-2, 1.6, 7]], alvo: [[2, 9, -60], [4, 12, -60], [6, 15, -60]], fov: [52, 48] },
+    ceu: { hor: 0x2a3660, meio: 0x111a3c, zen: 0x04061a, baixo: 0x080a14, sol: 0xb8c6f0, expo: 0.6, brilho: 0.42, nuvens: 0, estrelas: 2.6, via: 2.8, disco: 1.6 },
+    paraSol: [-0.26, 0.3, -0.92], sol: [0x9fb4ff, 0.55], hemi: [0x4a5a8a, 0x1a1c24, 0.35], nevoa: [0x1a2238, 0.0007], exposicao: 1.15, noite: true,
+    trilho: { pos: [[7, 1.5, -2], [8, 1.55, -5], [9, 1.6, -8]], alvo: [[10, 11, -80], [12, 14, -82], [14, 17, -84]], fov: [54, 50] },   // na beira d'água, avançando sobre o lago
+  },
+  colinas_noite: {
+    ceu: { hor: 0x2a3660, meio: 0x111a3c, zen: 0x04061a, baixo: 0x080a14, sol: 0xb8c6f0, expo: 0.6, brilho: 0.42, nuvens: 0, estrelas: 2.6, via: 2.8, disco: 1.6 },
+    paraSol: [-0.12, 0.17, -0.98], sol: [0x9fb4ff, 0.7], hemi: [0x4a5a8a, 0x1a1c24, 0.4], nevoa: [0x1a2238, 0.0005], exposicao: 1.25, noite: true,
+    trilho: { pos: [[-46, 44, 196], [-30, 46, 182], [-12, 48, 170]], alvo: [[0, 22, -40], [8, 20, -70], [14, 18, -100]], fov: [42, 38] },   // da encosta, a lua sobre o lago
   },
   colinas: {
     ceu: { hor: 0xffc890, meio: 0xc8c6d8, zen: 0x5a80b4, baixo: 0x6a6050, sol: 0xffd8a8, expo: 0.45, brilho: 1.15, nuvens: 0.55, cobertura: 0.32, nuvem: 0xfff0dc, nuvemSombra: 0x9090a8 },
@@ -70,7 +85,7 @@ const def = {
       vela: material(tVela, { rep: [1, 2], normal: 0.4, rug: 1, env: 0.5 }),
       rede: new THREE.MeshStandardMaterial({ map: tRede, transparent: true, alphaTest: 0.35, side: THREE.DoubleSide, roughness: 1 }),
       junco: new THREE.MeshStandardMaterial({ color: 0x7a7c4a, roughness: 0.95 }),
-      folha: new THREE.MeshStandardMaterial({ color: 0x707c56, roughness: 0.95 }),
+      folha: new THREE.MeshStandardMaterial({ color: 0x5f6b4a, roughness: 0.95 }),
     };
     const N = tex.criarRuido(seed + 180);
 
@@ -100,6 +115,14 @@ const def = {
     // barco na areia, barco ancorado, redes, juncos, pedras de basalto e oliveiras na encosta
     const b1 = barcoPesca({ mats }); b1.position.set(5.5, 0.62, 0.6); b1.rotation.set(0.04, -0.55, 0.09); cena.add(b1);
     const b2 = barcoPesca({ mats, remos: false }); b2.position.set(16, 0.55, -132); b2.rotation.y = 0.8; cena.add(b2);
+    // à noite, uma lamparina de óleo no barco ancorado (pesca noturna, Lc 5,5) e o seu reflexo alongado na água
+    const lamparina = V.noite ? brilho(0.9) : null, reflexo = V.noite ? brilho(0.32) : null;
+    if (lamparina) {
+      lamparina.scale.set(5, 5, 1); reflexo.scale.set(1.4, 7, 1); reflexo.position.set(16, -2.6, -131);
+      reflexo.material.depthTest = false; reflexo.renderOrder = 2;                // o reflexo fica sob o plano opaco da água
+      cena.add(lamparina, reflexo);
+      const luzB = new THREE.PointLight(0xffa050, 6, 26, 1.6); luzB.position.set(16, 1.9, -131.5); cena.add(luzB);
+    }
     const r1 = rede(3.6, 1.7, mats); r1.position.set(-1.0, altPerto(-1.0, 4.2), 4.2); r1.rotation.y = 0.5; cena.add(r1);
     const r2 = rede(3.0, 1.5, mats); r2.position.set(2.6, altPerto(2.6, 7.5), 7.5); r2.rotation.y = -0.2; cena.add(r2);
     const rr = rngFor(seed, 41);
@@ -118,16 +141,28 @@ const def = {
     }
     // bosques de oliveiras na encosta (instanciados)
     const pts = [];
-    for (let i = 0; i < 520; i++) { const x = (rr() - 0.5) * 460, z = 40 + rr() * 260; if (Math.abs(x + 30) < 30 && z > 150 && z < 230) continue;   // clareira onde a câmera fica
-      if (N.fbm(x * 0.012 + 9, z * 0.012, 3) < 0.45) continue; pts.push([x, altPerto(x, z) - 0.1, z, 0.8 + rr() * 0.6, rr() * 6]); }
+    // olivais plantados em fileiras (talhões com orientação própria), com falhas e variação de tamanho
+    for (let tz = 0; tz < 6; tz++) for (let tx = 0; tx < 9; tx++) {
+      const cx = -220 + tx * 52 + (rr() - 0.5) * 12, cz = 48 + tz * 42 + (rr() - 0.5) * 10;
+      if (Math.abs(cx + 30) < 40 && cz > 140 && cz < 240) continue;                 // clareira onde a câmera fica
+      if (N.fbm(cx * 0.01 + 9, cz * 0.01, 3) < 0.42) continue;                      // nem todo talhão é olival
+      const ang = (rr() - 0.5) * 0.5, ca = Math.cos(ang), sa = Math.sin(ang);
+      for (let i = 0; i < 6; i++) for (let j = 0; j < 5; j++) {
+        if (rr() < 0.12) continue;
+        const lx = (i - 2.5) * 7.5 + (rr() - 0.5) * 1.2, lz = (j - 2) * 7.5 + (rr() - 0.5) * 1.2;
+        const x = cx + lx * ca - lz * sa, z = cz + lx * sa + lz * ca;
+        pts.push([x, altPerto(x, z) - 0.1, z, 0.75 + rr() * 0.45, rr() * 6]);
+      }
+    }
     cena.add(bosque({ pontos: pts, mats, seed }));
     // um muro baixo de pedra seca na encosta (terraços)
     for (let i = 0; i < 18; i++) { const x = -40 + i * 4.6, z = 30 + 2 * Math.sin(i * 0.7); cena.add(malha(caixa(4.4, 0.7, 0.8, { raio: 0.15, esc: 0.6 }), mats.rocha, { pos: [x, altPerto(x, z) + 0.3, z] })); }
 
-    const nv1 = criarNevoa({ y: 1.2, cor: V.noite ? 0x3a4668 : 0xffe6d0, op: V.noite ? 0.35 : 0.5, esc: 0.006, perto: 40, longe: 2600, tam: 6000 });
+    // vista do alto (colinas), a névoa rasante vira mancha sobre a água: fica só um véu
+    const nv1 = criarNevoa({ y: 1.2, cor: V.noite ? 0x3a4668 : 0xffe6d0, op: V.noite ? 0.35 : P.vista === 'colinas' ? 0.16 : 0.5, esc: 0.006, perto: 40, longe: 2600, tam: 6000 });
     const nv2 = criarNevoa({ y: 18, cor: V.noite ? 0x2a3450 : 0xf0dccc, op: V.noite ? 0.2 : 0.3, esc: 0.003, perto: 300, longe: 3200, tam: 7000 });
     cena.add(nv1, nv2);
-    const sol = criarSol({ cor: V.sol[0], intensidade: V.sol[1], dir: paraSol, alvo: P.vista === 'colinas' ? [0, 10, 60] : [0, 1, 0], dist: 200, caixa: P.vista === 'colinas' ? 140 : 40, mapa: 4096, bias: -0.0003, normalBias: 0.05, near: 20, far: 500 });
+    const sol = criarSol({ cor: V.sol[0], intensidade: V.sol[1], dir: paraSol, alvo: (P.vista || '').startsWith('colinas') ? [0, 10, 60] : [0, 1, 0], dist: 200, caixa: (P.vista || '').startsWith('colinas') ? 140 : 40, mapa: 4096, bias: -0.0003, normalBias: 0.05, near: 20, far: 500 });
     cena.add(sol, sol.target);
     cena.add(new THREE.HemisphereLight(V.hemi[0], V.hemi[1], V.hemi[2]));
     const poeira = criarPoeira3D({ semente: seed, n: V.noite ? 0 : 160, caixa: [-20, 0.3, -20, 20, 6, 16], vel: [0.12, 0.03, 0.05], cor: 0xffe8c8, tam: 1.2, op: 0.45 });
@@ -143,6 +178,7 @@ const def = {
         nv1.material.uniforms.uT.value = t; nv2.material.uniforms.uT.value = t;
         mAgua.normalMap.offset.set((t * 0.0012) % 1, (t * 0.0005) % 1);
         b2.position.y = 0.55 + 0.03 * Math.sin(t * 0.9); b2.rotation.z = 0.02 * Math.sin(t * 0.7);    // o barco ancorado balança de leve
+        if (lamparina) { const f = 0.9 + 0.06 * Math.sin(t * 7.1) + 0.04 * Math.sin(t * 12.7); lamparina.position.set(16, 1.9 + b2.position.y - 0.55, -131.5); lamparina.material.opacity = 0.9 * f; reflexo.material.opacity = 0.32 * f; }
       },
     };
   },
