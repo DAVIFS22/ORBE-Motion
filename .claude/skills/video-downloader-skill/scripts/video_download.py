@@ -119,7 +119,7 @@ def get_video_info(url):
         return None
 
 
-def download_video_internal(url, output_path, quality, format_type, audio_only, is_retry=False):
+def download_video_internal(url, output_path, quality, format_type, audio_only, cookies=None, is_retry=False):
     """
     Internal function to download video with specific URL.
     Returns (success, error_message)
@@ -145,7 +145,11 @@ def download_video_internal(url, output_path, quality, format_type, audio_only, 
         cmd.extend(["--extractor-args", "bilibili:videomode=html5"])
 
     # ----------------------------------------
-    
+
+    # Netscape cookies file for login-only videos
+    if cookies:
+        cmd.extend(["--cookies", cookies])
+
     if audio_only:
         cmd.extend([
             "-x",  # Extract audio
@@ -216,16 +220,17 @@ def download_video_internal(url, output_path, quality, format_type, audio_only, 
         return (False, str(e))
 
 
-def download_video(url, output_path=None, quality="best", format_type="mp4", audio_only=False):
+def download_video(url, output_path=None, quality="best", format_type="mp4", audio_only=False, cookies=None):
     """
     Download a video from YouTube, Bilibili or other platforms.
-    
+
     Args:
         url: Video URL
         output_path: Directory to save the video (default: smart detection)
         quality: Quality setting (best, 1080p, 720p, 480p, 360p, worst)
         format_type: Output format (mp4, webm, mkv, etc.)
         audio_only: Download only audio (mp3)
+        cookies: Path to a Netscape cookies file (optional)
     """
     check_yt_dlp()
     
@@ -264,7 +269,7 @@ def download_video(url, output_path=None, quality="best", format_type="mp4", aud
     try:
         # Attempt download
         success, error_msg = download_video_internal(
-            url, output_path, quality, format_type, audio_only, is_retry=False
+            url, output_path, quality, format_type, audio_only, cookies=cookies, is_retry=False
         )
         
         if success:
@@ -318,15 +323,21 @@ def main():
         action="store_true",
         help="Download only audio as MP3"
     )
-    
+    parser.add_argument(
+        "-c", "--cookies",
+        default=None,
+        help="Path to a Netscape cookies file for authentication"
+    )
+
     args = parser.parse_args()
-    
+
     success = download_video(
         url=args.url,
         output_path=args.output,
         quality=args.quality,
         format_type=args.format,
-        audio_only=args.audio_only
+        audio_only=args.audio_only,
+        cookies=args.cookies
     )
     
     sys.exit(0 if success else 1)
